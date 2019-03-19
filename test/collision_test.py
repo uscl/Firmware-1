@@ -5,7 +5,6 @@ PKG = 'px4'
 from pymavlink import mavutil
 
 def main():
-
     # Start a connection listening to a UDP port
     the_connection = mavutil.mavlink_connection('udpin:localhost:14541')
 
@@ -22,7 +21,7 @@ def main():
             # Mission Flight Mode
             msg = the_connection.recv_match(type='COLLISION',blocking=False)
             if msg:
-                print("The vehicle has crashed into an obstacle")
+                print "\033[91mError: The vehicle has crashed into an obstacle \033[0m"
 
 
 
