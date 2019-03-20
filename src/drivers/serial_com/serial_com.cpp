@@ -417,7 +417,7 @@ ssize_t
 SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 {
 	unsigned count = buflen / sizeof(struct serial_com_s);
-	struct serial_com_s *rbuf = reinterpret_cast<struct serial_com_s *>(buffer);
+	serial_com_s *rbuf = reinterpret_cast<serial_com_s *>(buffer);
 	int ret = 0;
 
 	if (count < 1) {
