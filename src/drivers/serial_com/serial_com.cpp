@@ -343,12 +343,10 @@ SERIAL_COM::probe()
 	return measure();
 }
 
-
 int
 SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 {
-	switch (cmd)
-	{
+	switch (cmd) {
 
 	case SENSORIOCSPOLLRATE: {
 			switch (arg) {
@@ -413,7 +411,6 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 	/* give it to the bus-specific superclass */
 	// return bus_ioctl(filp, cmd, arg);
 	return CDev::ioctl(filp, cmd, arg);
-	}
 }
 
 ssize_t
