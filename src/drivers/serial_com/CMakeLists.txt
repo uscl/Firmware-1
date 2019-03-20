@@ -33,12 +33,11 @@
 px4_add_module(
 	MODULE drivers__serial_com
 	MAIN serial_com
+	STACK_MAIN 1200
 	COMPILE_FLAGS
 		-Os
 	SRCS
 		serial_com.cpp
 		serial_com_parser.cpp
 	DEPENDS
-		platforms__common
-	)
-# vim: set noet ft=cmake fenc=utf-8 ff=unix : 
+	) 
