@@ -350,37 +350,24 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 	switch (cmd)
 	{
 
-	case SENSORIOCSPOLLRATE:
-
-	{
-			switch (arg)
-			{
-
-			/* switching to manual polling */
-			case SENSOR_POLLRATE_MANUAL:
-				stop();
-				_measure_ticks = 0;
-				return OK;
-
-			/* external signalling (DRDY) not supported */
-			case SENSOR_POLLRATE_EXTERNAL:
+	case SENSORIOCSPOLLRATE: {
+			switch (arg) {
 
 			/* zero would be bad */
 			case 0:
 				return -EINVAL;
 
-			/* set default/max polling rate */
-			case SENSOR_POLLRATE_MAX:
+			/* set default polling rate */
 			case SENSOR_POLLRATE_DEFAULT: {
 					/* do we need to start internal polling? */
 					bool want_start = (_measure_ticks == 0);
 
 					/* set interval for next measurement to minimum legal value */
-					_measure_ticks = USEC2TICK(SERIAL_COM_CONVERSION_INTERVAL);
+					_measure_ticks = USEC2TICK(MS5611_CONVERSION_INTERVAL);
 
 					/* if we need to start the poll state machine, do it */
 					if (want_start) {
-						start();
+						start_cycle();
 					}
 
 					return OK;
@@ -388,7 +375,6 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 			/* adjust to a legal polling interval in Hz */
 			default: {
-
 					/* do we need to start internal polling? */
 					bool want_start = (_measure_ticks == 0);
 
@@ -396,7 +382,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 					unsigned ticks = USEC2TICK(1000000 / arg);
 
 					/* check against maximum rate */
-					if (ticks < USEC2TICK(SERIAL_COM_CONVERSION_INTERVAL)) {
+					if (ticks < USEC2TICK(MS5611_CONVERSION_INTERVAL)) {
 						return -EINVAL;
 					}
 
@@ -405,7 +391,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 					/* if we need to start the poll state machine, do it */
 					if (want_start) {
-						start();
+						start_cycle();
 					}
 
 					return OK;
@@ -413,41 +399,20 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 			}
 		}
 
-	case SENSORIOCGPOLLRATE:
-		if (_measure_ticks == 0) {
-			return SENSOR_POLLRATE_MANUAL;
-		}
-
-		return (1000 / _measure_ticks);
-
-	case SENSORIOCSQUEUEDEPTH: {
-			/* lower bound is mandatory, upper bound is a sanity check */
-			if ((arg < 1) || (arg > 100)) {
-				return -EINVAL;
-			}
-
-			irqstate_t flags = px4_enter_critical_section();
-
-			if (!_reports->resize(arg)) {
-				px4_leave_critical_section(flags);
-				return -ENOMEM;
-			}
-
-			px4_leave_critical_section(flags);
-
-			return OK;
-		}
-
-	case SENSORIOCGQUEUEDEPTH:
-		return _reports->size();
-
 	case SENSORIOCRESET:
-		/* XXX implement this */
-		return -EINVAL;
+		/*
+		 * Since we are initialized, we do not need to do anything, since the
+		 * PROM is correctly read and the part does not need to be configured.
+		 */
+		return OK;
 
 	default:
-		/* give it to the superclass */
-		return CDev::ioctl(filp, cmd, arg);
+		break;
+	}
+
+	/* give it to the bus-specific superclass */
+	// return bus_ioctl(filp, cmd, arg);
+	return CDev::ioctl(filp, cmd, arg);
 	}
 }
 
