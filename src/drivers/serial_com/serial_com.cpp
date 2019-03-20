@@ -382,7 +382,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 					unsigned ticks = USEC2TICK(1000000 / arg);
 
 					/* check against maximum rate */
-					if (ticks < USEC2TICK(MS5611_CONVERSION_INTERVAL)) {
+					if (ticks < USEC2TICK(SERIAL_COM_CONVERSION_INTERVAL)) {
 						return -EINVAL;
 					}
 
