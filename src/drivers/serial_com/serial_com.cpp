@@ -20,7 +20,7 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/clock.h>
 
-#include <lib/perf_counter.h>
+#include <systemlib/perf_counter.h>
 #include <systemlib/err.h>
 #include <systemlib/conversions.h>
 #include <systemlib/px4_macros.h>
