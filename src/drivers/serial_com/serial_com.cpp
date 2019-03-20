@@ -158,7 +158,7 @@ private:
 	unsigned char 					packet_buf[HILS_PACKET_SIZE];
 	unsigned char					_HilsTxBuffer[HILS_TXBUF_SIZE];
 
-	void				start_cycle(unsigned delay_ticks);
+	void				start_cycle(unsigned delay_ticks = 1);
 	void				stop_cycle();
 	void				cycle();
 	int					measure();
