@@ -20,7 +20,7 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/clock.h>
 
-#include <systemlib/perf_counter.h>
+#include <lib/perf_counter.h>
 #include <systemlib/err.h>
 #include <systemlib/conversions.h>
 #include <systemlib/px4_macros.h>
@@ -34,7 +34,6 @@
 #include <uORB/uORB.h>
 #include <uORB/topics/subsystem_info.h>
 #include <uORB/topics/serial_com.h>
-#include <uORB/topics/hils_pwm.h>
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/actuator_outputs.h>
 
