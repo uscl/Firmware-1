@@ -416,7 +416,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 ssize_t
 SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 {
-	unsigned count = buflen / sizeof(struct serial_com_s);
+	unsigned count = buflen / sizeof(serial_com_s);
 	serial_com_s *rbuf = reinterpret_cast<serial_com_s *>(buffer);
 	int ret = 0;
 
