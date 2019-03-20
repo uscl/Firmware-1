@@ -37,7 +37,7 @@ px4_add_board(
 		imu/l3gd20
 		imu/lsm303d
 		imu/mpu6000
-		imu/mpu9250
+		#imu/mpu9250
 		#iridiumsbd
 		#irlock
 		#lights/blinkm
@@ -62,6 +62,7 @@ px4_add_board(
 		#test_ppm
 		tone_alarm
 		#uavcan
+		serial_com # USCL
 
 	MODULES
 		#attitude_estimator_q
@@ -70,8 +71,8 @@ px4_add_board(
 		dataman
 		ekf2
 		events
-		fw_att_control
-		fw_pos_control_l1
+		#fw_att_control
+		#fw_pos_control_l1
 		#gnd_att_control
 		#gnd_pos_control
 		land_detector
@@ -85,7 +86,7 @@ px4_add_board(
 		navigator
 		sensors
 		vmount
-		vtol_att_control
+		#vtol_att_control
 		#wind_estimator
 
 	SYSTEMCMDS
