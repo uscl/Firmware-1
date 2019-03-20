@@ -158,8 +158,8 @@ private:
 	unsigned char 					packet_buf[HILS_PACKET_SIZE];
 	unsigned char					_HilsTxBuffer[HILS_TXBUF_SIZE];
 
-	void				start();
-	void				stop();
+	void				start_cycle(unsigned delay_ticks);
+	void				stop_cycle();
 	void				cycle();
 	int					measure();
 	int					collect();
@@ -417,7 +417,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 }
 
 ssize_t
-SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)  ////////////////////////////read/////////////////////////
+SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 {
 	unsigned count = buflen / sizeof(struct serial_com_s);
 	struct serial_com_s *rbuf = reinterpret_cast<struct serial_com_s *>(buffer);
@@ -802,18 +802,20 @@ SERIAL_COM::collect()
 }
 
 void
-SERIAL_COM::start()
+SERIAL_COM::start_cycle(unsigned delay_ticks)
 {
 	/* reset the report ring and state machine */
 	_collect_phase = false;
+	_measure_phase = false;
 	_reports->flush();
 
-	work_queue(HPWORK, &_work, (worker_t)&SERIAL_COM::cycle_trampoline, this, 1);
+	work_queue(HPWORK, &_work, (worker_t)&SERIAL_COM::cycle_trampoline, this, delay_ticks);
 
 }
 
+
 void
-SERIAL_COM::stop()
+SERIAL_COM::stop_cycle()
 {
 	work_cancel(HPWORK, &_work);
 }
