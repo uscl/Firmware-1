@@ -15,13 +15,15 @@ def main():
 
     while True:
         msg = the_connection.recv_match(type='HEARTBEAT',blocking=False)
-        nav_mode = the_connection.messages['HEARTBEAT'].custom_mode
+        base_mode = the_connection.messages['HEARTBEAT'].base_mode
+        custom_mode = the_connection.messages['HEARTBEAT'].custom_mode
 
-        if (nav_mode == 67371008):
+
+        if (custom_mode == 67371008 and base_mode == 157):
             # Mission Flight Mode
             msg = the_connection.recv_match(type='COLLISION',blocking=False)
             if msg:
-                print "\033[91mError: The vehicle has crashed into an obstacle \033[0m"
+                print "\033[91m Error: The vehicle has crashed into an obstacle \033[0m"
 
 
 
