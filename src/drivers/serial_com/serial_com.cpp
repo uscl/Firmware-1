@@ -282,7 +282,7 @@ SERIAL_COM::SERIAL_COM(const char *port) :
 
 SERIAL_COM::~SERIAL_COM()
 {
-	stop();
+	stop_cycle();
 
 	if (_reports != nullptr) {
 		delete _reports;
