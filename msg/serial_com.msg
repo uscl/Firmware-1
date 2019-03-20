@@ -13,6 +13,7 @@
 #int16 dummy1
 #int16 dummy2
 
+uint64 timestamp		# time since system start (microseconds)
 float32 latitude
 float32 longitude
 float32 altitude
