@@ -363,7 +363,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 					bool want_start = (_measure_ticks == 0);
 
 					/* set interval for next measurement to minimum legal value */
-					_measure_ticks = USEC2TICK(MS5611_CONVERSION_INTERVAL);
+					_measure_ticks = USEC2TICK(SERIAL_COM_CONVERSION_INTERVAL);
 
 					/* if we need to start the poll state machine, do it */
 					if (want_start) {
