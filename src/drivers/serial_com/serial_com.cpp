@@ -27,18 +27,13 @@
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_range_finder.h>
-//#include <drivers/drv_serial.h>
 #include <drivers/device/device.h>
 #include <drivers/device/ringbuffer.h>
 
 #include <uORB/uORB.h>
 #include <uORB/topics/subsystem_info.h>
 #include <uORB/topics/serial_com.h>
-#include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/actuator_outputs.h>
-
-#include <uORB/topics/sensor_accel.h>
-#include <uORB/topics/sensor_gyro.h>
 
 #include <lib/conversion/rotation.h>
 #include <drivers/drv_accel.h>
@@ -132,7 +127,6 @@ private:
 	int								_fd;
 	char							_linebuf[44];
 	unsigned						_linebuf_index;
-//	enum SERIAL_COM_PARSE_STATE		_parse_state;
 	int								_class_instance;
 	int								_orb_class_instance;
 	orb_advert_t					_serial_com_topic;
@@ -722,14 +716,13 @@ SERIAL_COM::collect()
 			}
 		}
 	}
-	//warnx("\n crc = %x, ret = %d", crc_Hils, ret);
 
 	perf_end(_sample_perf);
 
 	if (!valid) {
 		return -EAGAIN;
 	}
-	//warnx("\n %d", 6);
+
 	return OK;
 }
 
