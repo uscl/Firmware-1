@@ -178,7 +178,7 @@ private:
 extern "C" __EXPORT int serial_com_main(int argc, char *argv[]);
 
 SERIAL_COM::SERIAL_COM(const char *port) :
-	CDev("SERIAL_COM", SERIAL_DEVICE_PATH),
+	CDev("SERIAL_COM", "/dev/serial_com0"),
 	_reports(nullptr),
 	_measure_ticks(0),
 	_collect_phase(false),
