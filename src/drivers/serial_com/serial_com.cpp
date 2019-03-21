@@ -20,7 +20,6 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/clock.h>
 
-//#include <systemlib/perf_counter.h>
 #include <perf/perf_counter.h>
 #include <systemlib/err.h>
 #include <systemlib/conversions.h>
@@ -36,31 +35,15 @@
 #include <uORB/topics/subsystem_info.h>
 #include <uORB/topics/serial_com.h>
 #include <uORB/topics/sensor_combined.h>
+#include <uORB/topics/actuator_outputs.h>
 
 #include <uORB/topics/sensor_accel.h>
 #include <uORB/topics/sensor_gyro.h>
 
-#include <uORB/topics/actuator_outputs.h>
-
-#include <uORB/topics/vehicle_global_position.h>
-#include <uORB/topics/home_position.h>
-#include <uORB/topics/vehicle_attitude.h>
-//#include <uORB/topics/mission_info.h>
-#include <uORB/topics/start_goal_position.h>
-#include <uORB/topics/vehicle_control_mode.h>
-#include <uORB/topics/actuator_armed.h>
-#include <uORB/topics/input_rc.h>
-#include <uORB/topics/avoidance_path.h>
-#include <uORB/topics/calculate_next_path.h>
-#include <uORB/topics/mavlink_log.h>
-
 #include <lib/conversion/rotation.h>
 #include <drivers/drv_accel.h>
 #include <drivers/drv_gyro.h>
-#include <mathlib/math/filter/LowPassFilter2p.cpp>
-#include <drivers/device/integrator.h>
-#include <matrix/matrix/math.hpp>
-#include <systemlib/mavlink_log.h>
+
 #include <board_config.h>
 
 //#include "serial_com_parser.h"
@@ -86,19 +69,6 @@ static const int ERROR = -1;
 #define HILS_PACKET_SIZE 42
 #define HILS_TXBUF_SIZE 32
 
-#define INTERFACE_RXBUF_SIZE 50
-#define INTERFACE_PACKET_SIZE 42
-#define INTERFACE_TXBUF_SIZE 100
-
-typedef enum JETSON_STATE {
-	JETSON_STATE_INIT = 0,
-	JETSON_STATE_PTHREAD_CREATED = 1,
-	JETSON_STATE_LIDAR_ERROR = 2,
-	JETSON_STATE_PLANNING_ERROR = 3,
-	JETSON_STATE_SMOOTHING_ERROR = 4,
-	JETSON_STATE_GUIDANCE_ERROR = 5,
-	JETSON_STATE_COMM_ERROR = 6,
-} JETSON_STATE;
 /* CRC table for CCITT-16 (Polynomial: 0x1021) */
 unsigned int crc_table[256]=
 {
@@ -148,6 +118,7 @@ public:
 	virtual int				ioctl(struct file *filp, int cmd, unsigned long arg);
 	void				print_info();
 	char							log_status;
+	char					tx_status;
 
 protected:
 	virtual int			probe();
@@ -165,16 +136,7 @@ private:
 	int								_class_instance;
 	int								_orb_class_instance;
 	orb_advert_t					_serial_com_topic;
-	orb_advert_t					_mavlink_log_pub;
 	int 							actuator_outputs_fd;
-	int								vehicle_global_position_fd;
-	int								vehicle_attitude_fd;
-	int								_Mission_info_sub;
-	int								_home_pos_sub;
-	int								_vehicle_control_mode_sub;
-	int								_armed_sub;
-	int								_input_rc_sub;
-	int								_calc_next_path_sub;
 	unsigned						_consecutive_fail_count;
 	perf_counter_t					_sample_perf;
 	perf_counter_t					_comms_errors;
@@ -183,9 +145,8 @@ private:
 	unsigned int 					frame_sync_Hils;
 	unsigned char 					*p_gse;
 	unsigned int					crc_Hils;
-	unsigned short					_actuator_pwm[8];
-
-	float							_quarternion[4];
+	unsigned int					_HilsTx_FrameLength;
+	float 							_actuator_pwm[8];
 
 	// HILS Receiving buffer & Pointer
 	unsigned char 					_HilsRxBuffer[HILS_RXBUF_SIZE];
@@ -194,75 +155,23 @@ private:
 	unsigned char 					packet_buf[HILS_PACKET_SIZE];
 	unsigned char					_HilsTxBuffer[HILS_TXBUF_SIZE];
 
-	bool m_bpx4ready;
-	uint8_t _statusJetson;
-	uint8_t _prev_statusJetson;
-	bool _mavLog_status_flag;
-	int m_bRecievedReadyACK;
-	int m_bReceivedMissionInfoACK;
-	int m_bRecievedStart_and_GoalACK;
-	bool m_bRecievedChange_Start_and_Goal;
-	int m_bSendStopFlag;
-	int m_bReceivedStopACK;
-	bool m_bInterface_Processing;
-
-	float _mission_area_NW[2], _mission_area_NE[2], _mission_area_SW[2], _mission_area_SE[2];
-	bool m_bUpdateMissionArea;
-	float _start_position[3],_end_position[3], _home_position[3];
-	float _cellwidth;
-	uint32_t _width, _height,_thres0, _thresd;
-	bool m_bUpdateStart_and_Goal;
-	bool m_bSendpx4ready, m_bSendMissionArea, m_bSendStart_and_Goal;
-	int m_bSendMissionFlag, m_bSendMissionInfo;
-	int m_bReceivedMissionFlag_ACK;
-	bool m_bChangedMode;
-	int _CalcPathFlag;
-	int m_bCalcPathFlag;
-	uint8_t _command_calc_path;
-
-	//Interface between jetson and pixhawk Receiving buffer & pointer
-
-
-	void				start();
-	void				stop();
+	void				start_cycle(unsigned delay_ticks = 1);
+	void				stop_cycle();
 	void				cycle();
 	int					measure();
 	int					collect();
-	unsigned int		Interface_packet_parser(unsigned char *buf);
+	unsigned int		send_pwm_packet(unsigned int muxidx);
+	unsigned int		Hils_packet_parser(unsigned char *buf);
+	void 				build_HILS_packet(unsigned short *pwm_data);
 
-	unsigned short		TxFloat32(unsigned short address, float value, unsigned char *p);
 	unsigned short 		TxUint8(unsigned short address, unsigned char value, unsigned char *p);
 	unsigned short      TxUint16(unsigned short address, unsigned short value, unsigned char *p);
 	unsigned short 		TxUint32(unsigned short address, unsigned int value, unsigned char *p);
 	unsigned short 		UpdateCRC(unsigned short crc, unsigned char bytedata);
 
-
-
 	int16_t 			RxInt16(unsigned char MSB, unsigned char LSB);
 	static void			cycle_trampoline(void *arg);
 
-public:
-	float							_mc_lat;
-	float							_mc_lon;
-	float							_mc_alt;
-	float							_mc_yaw;
-	float							_home_alt;
-
-	unsigned int		send_mission_info_packet(void);
-	unsigned int		send_mission_flag_packet(uint8_t mission_flag_cmd);
-	unsigned int 		send_stop_packet(uint8_t stop_flag_cmd);
-	unsigned int 		send_calculate_path(uint8_t command_calc_path);
-	unsigned int		send_state_packet(void);
-	void 				build_mission_info_packet();
-	void 				build_mission_flag_packet(uint8_t mission_flag_cmd);
-	void 				build_state_packet();
-
-	unsigned char 					_InterfaceRxBuffer[INTERFACE_RXBUF_SIZE];
-	unsigned int 					_InterfaceRxBuf_StartPtr;
-	unsigned int 					_InterfaceRxBuf_EndPtr;
-	unsigned char 					_Interface_packet_buf[INTERFACE_PACKET_SIZE];
-	unsigned char					_InterfaceTxBuffer[INTERFACE_TXBUF_SIZE];
-	unsigned int					_HilsTx_FrameLength;
 
 };
 
@@ -279,58 +188,16 @@ SERIAL_COM::SERIAL_COM(const char *port) :
 	_class_instance(-1),
 	_orb_class_instance(-1),
 	_serial_com_topic(nullptr),
-	_mavlink_log_pub(nullptr),
 	actuator_outputs_fd(-1),
-	vehicle_global_position_fd(-1),
-	vehicle_attitude_fd(-1),
-	_Mission_info_sub(-1),
-	_home_pos_sub(-1),
-	_vehicle_control_mode_sub(-1),
-	_armed_sub(-1),
-	_input_rc_sub(-1),
-	_calc_next_path_sub(-1),
 	_consecutive_fail_count(0),
 	_sample_perf(perf_alloc(PC_ELAPSED, "serial_com_read")),
-	_comms_errors(perf_alloc(PC_COUNT, "serial_com_err")),
-	m_bpx4ready(false),
-	_statusJetson(0),
-	_prev_statusJetson(0),
-	_mavLog_status_flag(false),
-	m_bRecievedReadyACK(-1),
-	m_bReceivedMissionInfoACK(-1),
-	m_bRecievedStart_and_GoalACK(-1),
-	m_bRecievedChange_Start_and_Goal(false),
-	m_bSendStopFlag(-1),
-	m_bReceivedStopACK(-1),
-	m_bInterface_Processing(false),
-	m_bUpdateMissionArea(false),
-	_cellwidth(0.0f),
-	_width(0),
-	_height(0),
-	_thres0(0),
-	_thresd(0),
-	m_bUpdateStart_and_Goal(false),
-	m_bSendpx4ready(false),
-	m_bSendMissionArea(false),
-	m_bSendStart_and_Goal(false),
-	m_bSendMissionFlag(-1),
-	m_bSendMissionInfo(-1),
-	m_bReceivedMissionFlag_ACK(-1),
-	m_bChangedMode(false),
-	_CalcPathFlag(-1),
-	m_bCalcPathFlag(-1),
-	_command_calc_path(-1),
-	_mc_lat(0.0f),
-	_mc_lon(0.0f),
-	_mc_alt(0.0f),
-	_mc_yaw(0),
-	_home_alt(0.0f)
-
+	_comms_errors(perf_alloc(PC_COUNT, "serial_com_err"))
 {
 	/* store port name */
 	strncpy(_port, port, sizeof(_port));
 	/* enforce null termination */
 	_port[sizeof(_port) - 1] = '\0';
+
 
 	// Hils Rx Buffer initialization
 	for (int i=0; i<HILS_RXBUF_SIZE; i++)
@@ -346,21 +213,6 @@ SERIAL_COM::SERIAL_COM(const char *port) :
 	for (int i=0; i<HILS_PACKET_SIZE; i++)
 	{
 		packet_buf[i] = 0;
-	}
-///////////////////////////////////////////////////
-	for (int i=0; i<INTERFACE_RXBUF_SIZE; i++)
-	{
-		_InterfaceRxBuffer[i] = 0;
-	}
-
-	for (int i=0; i<INTERFACE_TXBUF_SIZE; i++)
-	{
-		_InterfaceTxBuffer[i] = 0;
-	}
-
-	for (int i=0; i<INTERFACE_PACKET_SIZE; i++)
-	{
-		_Interface_packet_buf[i] = 0;
 	}
 
 	_HilsTx_FrameLength = 0;
@@ -409,29 +261,28 @@ SERIAL_COM::SERIAL_COM(const char *port) :
 	hils_pktlen = 0;
 	crc_flag_Hils = 0;
 	frame_sync_Hils = 0;
-	p_gse = nullptr;
 	_HilsRxBuf_StartPtr = 0;
 	_HilsRxBuf_EndPtr = 0;
 	crc_Hils = 0;
 
-	_InterfaceRxBuf_StartPtr = 0;
-	_InterfaceRxBuf_EndPtr = 0;
-
 	for (int i=0; i<8; i++)
 	{
-		_actuator_pwm[i] = 0;
+		_actuator_pwm[i] = 0.0f;
 	}
+
 	for(int i = 0; i< 50; i++)
 	{
 		_linebuf[i] = 0;
 	}
+
 	log_status = 0;
+	tx_status = 0;
 
 }
 
 SERIAL_COM::~SERIAL_COM()
 {
-	stop();
+	stop_cycle();
 
 	if (_reports != nullptr) {
 		delete _reports;
@@ -440,10 +291,6 @@ SERIAL_COM::~SERIAL_COM()
 
 	if (_serial_com_topic != nullptr) {
 		orb_unadvertise(_serial_com_topic);
-	}
-
-	if(_mavlink_log_pub != nullptr) {
-		orb_unadvertise(_mavlink_log_pub);
 	}
 
 	if (_class_instance != -1) {
@@ -476,11 +323,10 @@ SERIAL_COM::init()
 		_class_instance = register_class_devname("/dev/serial_com");
 		struct serial_com_s ds_report = {};
 
-		_serial_com_topic = orb_advertise_multi(ORB_ID(avoidance_path), &ds_report,	&_orb_class_instance, ORB_PRIO_MAX);
+		_serial_com_topic = orb_advertise_multi(ORB_ID(serial_com), &ds_report,	&_orb_class_instance, ORB_PRIO_MAX);
 		if (_serial_com_topic == nullptr) {
 			DEVICE_LOG("failed to create serial_com object. Did you start uOrb?");
 		}
-
 
 	} while (0);
 
@@ -497,34 +343,19 @@ SERIAL_COM::probe()
 	return measure();
 }
 
-
 int
 SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 {
-	switch (cmd)
-	{
+	switch (cmd) {
 
-	case SENSORIOCSPOLLRATE:
-
-	{
-			switch (arg)
-			{
-
-			/* switching to manual polling */
-			case SENSOR_POLLRATE_MANUAL:
-				stop();
-				_measure_ticks = 0;
-				return OK;
-
-			/* external signalling (DRDY) not supported */
-			case SENSOR_POLLRATE_EXTERNAL:
+	case SENSORIOCSPOLLRATE: {
+			switch (arg) {
 
 			/* zero would be bad */
 			case 0:
 				return -EINVAL;
 
-			/* set default/max polling rate */
-			case SENSOR_POLLRATE_MAX:
+			/* set default polling rate */
 			case SENSOR_POLLRATE_DEFAULT: {
 					/* do we need to start internal polling? */
 					bool want_start = (_measure_ticks == 0);
@@ -534,7 +365,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 					/* if we need to start the poll state machine, do it */
 					if (want_start) {
-						start();
+						start_cycle();
 					}
 
 					return OK;
@@ -542,7 +373,6 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 			/* adjust to a legal polling interval in Hz */
 			default: {
-
 					/* do we need to start internal polling? */
 					bool want_start = (_measure_ticks == 0);
 
@@ -559,7 +389,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 
 					/* if we need to start the poll state machine, do it */
 					if (want_start) {
-						start();
+						start_cycle();
 					}
 
 					return OK;
@@ -567,46 +397,24 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 			}
 		}
 
-	case SENSORIOCGPOLLRATE:
-		if (_measure_ticks == 0) {
-			return SENSOR_POLLRATE_MANUAL;
-		}
-
-		return (1000 / _measure_ticks);
-
-	case SENSORIOCSQUEUEDEPTH: {
-			/* lower bound is mandatory, upper bound is a sanity check */
-			if ((arg < 1) || (arg > 100)) {
-				return -EINVAL;
-			}
-
-			irqstate_t flags = px4_enter_critical_section();
-
-			if (!_reports->resize(arg)) {
-				px4_leave_critical_section(flags);
-				return -ENOMEM;
-			}
-
-			px4_leave_critical_section(flags);
-
-			return OK;
-		}
-
-	//case SENSORIOCGQUEUEDEPTH:
-		//return _reports->size();
-
 	case SENSORIOCRESET:
-		/* XXX implement this */
-		return -EINVAL;
+		/*
+		 * Since we are initialized, we do not need to do anything, since the
+		 * PROM is correctly read and the part does not need to be configured.
+		 */
+		return OK;
 
 	default:
-		/* give it to the superclass */
-		return CDev::ioctl(filp, cmd, arg);
+		break;
 	}
+
+	/* give it to the bus-specific superclass */
+	// return bus_ioctl(filp, cmd, arg);
+	return CDev::ioctl(filp, cmd, arg);
 }
 
 ssize_t
-SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)  ////////////////////////////read/////////////////////////
+SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 {
 	unsigned count = buflen / sizeof(struct serial_com_s);
 	struct serial_com_s *rbuf = reinterpret_cast<struct serial_com_s *>(buffer);
@@ -666,264 +474,46 @@ SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)  //////////////
 int
 SERIAL_COM::measure()
 {
-	if(_statusJetson == JETSON_STATE_PTHREAD_CREATED) {
-		struct actuator_armed_s armed;
-		bool arming_updated = false;
 
-		orb_check(_armed_sub, &arming_updated);
+	/* get polling data from the actuator output */
+	struct actuator_outputs_s actuators;
 
-		if(arming_updated) {
-			orb_copy(ORB_ID(actuator_armed), _armed_sub, &armed);
+	px4_pollfd_struct_t fds[1] = {};
+	fds[0].fd = actuator_outputs_fd;
+	fds[0].events = POLLIN;
 
-			bool mission_area_updated = false;
-			bool home_pos_updated = false;
-			bool updated = false;
-			bool rc_updated = false;
-			//bool InMissionArea = false;
+	/* wait for sensor update of 1 file descriptor for 10 ms (1 second) */
+	int poll_ret = px4_poll(&fds[0], (sizeof(fds) / sizeof(fds[0])), 20);
 
-			uint8_t mission_flag_cmd = 0;
-			uint8_t stop_flag_cmd = 0;
+	/* handle the poll result */
+	if (poll_ret == 0)
+	{
+		/* this means none of our providers is giving us data */
+		//PX4_ERR("Got no data within a specified time");
 
-			/* get polling data from the actuator output */
-			struct vehicle_global_position_s global_pos;
-			struct vehicle_attitude_s mc_att;
-			struct mission_info_s mission_info;
-			struct vehicle_control_mode_s control_mode;
-			struct input_rc_s input_rc;
-			struct home_position_s home_pos;
-			struct calculate_next_path_s calc_path;
+	}
+	else if (poll_ret < 0)
+	{
+	/* this is seriously bad - should be an emergency */
+		//PX4_ERR("Critical error return value from poll(): %d", poll_ret);
+	}
+	else
+	{
+		if (fds[0].revents & POLLIN)
+		{
+			/* copy sensors raw data into local buffer */
+			orb_copy(ORB_ID(actuator_outputs), actuator_outputs_fd, &actuators);
 
-			orb_check(_Mission_info_sub, &mission_area_updated);
-			orb_check(_home_pos_sub, &home_pos_updated);
-
-			updated = mission_area_updated;
-			updated |= home_pos_updated;
-
-			if(updated)
+			for (int i=0; i<8; i++)
 			{
-				if(m_bSendMissionInfo < 0)
-				{
-					orb_copy(ORB_ID(mission_info), _Mission_info_sub, &mission_info);
-					orb_copy(ORB_ID(home_position), _home_pos_sub, &home_pos);
-					_mission_area_NW[0] = (mission_info.mission_area_NW[0]);
-					_mission_area_NW[1] = (mission_info.mission_area_NW[1]);
-
-					_mission_area_NE[0] =(mission_info.mission_area_NE[0]);
-					_mission_area_NE[1] = (mission_info.mission_area_NE[1]);
-
-					_mission_area_SW[0] = mission_info.mission_area_SW[0];
-					_mission_area_SW[1] = mission_info.mission_area_SW[1];
-
-					_mission_area_SE[0] = (mission_info.mission_area_SE[0]);
-					_mission_area_SE[1] = (mission_info.mission_area_SE[1]);
-
-					_start_position[0] = (mission_info.start_position[0]);
-					_start_position[1] = (mission_info.start_position[1]);
-					_start_position[2] = mission_info.start_position[2];
-
-					_end_position[0] = (mission_info.end_position[0]);
-					_end_position[1] = (mission_info.end_position[1]);
-					_end_position[2] = mission_info.end_position[2];
-
-					_home_position[0] = mission_info.mission_area_SW[0];
-					_home_position[1] = mission_info.mission_area_SW[1];
-					_home_position[2] = home_pos.alt;
-
-					_cellwidth = mission_info.cellwidth;
-					_width = mission_info.width;
-					_height = mission_info.height;
-					_thres0 = mission_info.thres0;
-					_thresd = mission_info.thresd;
-
-					printf("MissionNW = %3.6f,   %3.6f,   %3.6f\n", (double)_mission_area_NW[0], (double)_mission_area_NW[1], (double)_home_position[2]);
-					printf("MissionEnd = %3.6f,   %3.6f\n", (double)_end_position[0], (double)_end_position[1]);
-					printf("MissionStart = %3.6f,    %3.6f\n", (double)_start_position[0], (double)_start_position[1]);
-					if((_start_position[0] > 1.0f &&_start_position[0] < 39.0f )&& (_start_position[1] > 1.0f && _start_position[1] < 128.0f)
-							&& ( _end_position[0] > 1.0f && _end_position[0] < 39.0f) && (_end_position[1] > 1.0f && _end_position[1] < 128.0f)
-							&& ((_home_position[2] > 0.3f && _home_position[2] < 300.0f)|| (_home_position[2] < -0.3f && _home_position[2] > -300.0f) ))
-					{
-						m_bUpdateMissionArea = true;
-						m_bUpdateStart_and_Goal = true;
-						send_mission_info_packet();
-						m_bSendMissionInfo = -1;
-					}
-				}
-			}
-			if(armed.armed) {
-				if(m_bSendMissionFlag < 0)
-				{
-					orb_check(_vehicle_control_mode_sub, &updated);
-					orb_check(_input_rc_sub, &rc_updated);
-					if(updated && rc_updated)
-					{
-						orb_copy(ORB_ID(vehicle_control_mode), _vehicle_control_mode_sub, &control_mode);
-						orb_copy(ORB_ID(input_rc), _input_rc_sub, &input_rc);
-						if(control_mode.flag_control_auto_enabled)
-						{
-							if(input_rc.values[5] > 1500)
-							{
-								mission_flag_cmd = true;
-								send_mission_flag_packet(mission_flag_cmd);
-								m_bSendMissionFlag = -1;
-								printf("send mission flag true first\n");
-							}
-						}
-					}
-				} else if(m_bSendMissionFlag > 0) {
-					orb_check(_vehicle_control_mode_sub, &updated);
-					orb_check(_input_rc_sub, &rc_updated);
-					if(updated && rc_updated)
-					{
-						orb_copy(ORB_ID(vehicle_control_mode), _vehicle_control_mode_sub, &control_mode);
-						orb_copy(ORB_ID(input_rc), _input_rc_sub, &input_rc);
-						if(control_mode.flag_control_auto_enabled)
-						{
-							if(input_rc.values[5] < 1500)
-							{
-								mission_flag_cmd = false;
-								send_mission_flag_packet(mission_flag_cmd);
-								m_bSendMissionFlag = 1;
-								m_bChangedMode = true;
-								printf("send mission flag false low 1500\n");
-							} else if(input_rc.values[5] > 1500 && m_bChangedMode == true) {
-								m_bChangedMode = false;
-								m_bSendMissionFlag = -1;
-								printf("send mission flag true\n");
-							}
-						} else if(!control_mode.flag_control_auto_enabled){
-							m_bChangedMode = true;
-							mission_flag_cmd = false;
-							send_mission_flag_packet(mission_flag_cmd);
-							m_bSendMissionFlag = 1;
-							printf("send mission flag manual\n");
-						}
-					}
-				}
-
-				if(m_bReceivedMissionFlag_ACK > 0)
-				{
-					bool calc_updated = false;
-					orb_check(_calc_next_path_sub, &calc_updated);
-					if(calc_updated) {
-						orb_copy(ORB_ID(calculate_next_path), _calc_next_path_sub, &calc_path);
-						_CalcPathFlag = (int)calc_path.CalcPathFlag;
-						_command_calc_path = (uint8_t)calc_path.calculate_next;
-						m_bCalcPathFlag = -1;
-					}
-
-					if(m_bCalcPathFlag < 0) {
-						if(_CalcPathFlag > 0) {
-							send_calculate_path(_command_calc_path);
-							m_bCalcPathFlag = -1;
-						}
-					}
-
-					px4_pollfd_struct_t fds[2] = {};
-
-					fds[0].fd = vehicle_global_position_fd;
-					fds[0].events = POLLIN;
-
-					fds[1].fd = vehicle_attitude_fd;
-					fds[1].events = POLLIN;
-					/* wait for sensor update of 1 file descriptor for 10 ms (1 second) */
-
-					int poll_ret0 = px4_poll(&fds[0], (sizeof(fds) / sizeof(fds[0])), 200);
-
-					/* handle the poll result */
-					if (poll_ret0 == 0)
-					{
-						/* this means none of our providers is giving us data */
-						PX4_ERR("Got no gps, att data within a specified time");
-
-					}
-					else if (poll_ret0 < 0)
-					{
-					/* this is seriously bad - should be an emergency */
-						PX4_ERR("Critical error return value from poll(): %d", poll_ret0);
-					}
-					else
-					{
-						if (fds[0].revents & POLLIN)
-						{
-							/* copy sensors raw data into local buffer */
-							orb_copy(ORB_ID(vehicle_global_position), vehicle_global_position_fd, &global_pos);
-
-							_mc_lat = (float)global_pos.lat;
-							_mc_lon = (float)global_pos.lon;
-							_mc_alt = (float)global_pos.alt;
-						}
-
-						if (fds[1].revents & POLLIN)
-						{
-							/* copy sensors raw data into local buffer */
-							orb_copy(ORB_ID(vehicle_attitude), vehicle_attitude_fd, &mc_att);
-
-							float dcm[3][3];
-							float a = mc_att.q[0];
-							float b = mc_att.q[1];
-							float c = mc_att.q[2];
-							float d = mc_att.q[3];
-							float aa = a * a;
-							float ab = a * b;
-							float ac = a * c;
-							float ad = a * d;
-							float bb = b * b;
-							float bc = b * c;
-							float bd = b * d;
-							float cc = c * c;
-							float cd = c * d;
-							float dd = d * d;
-							dcm[0][0] = aa + bb - cc - dd;
-							dcm[0][1] = 2 * (bc - ad);
-							dcm[0][2] = 2 * (ac + bd);
-							dcm[1][0] = 2 * (bc + ad);
-							dcm[1][1] = aa - bb + cc - dd;
-							dcm[1][2] = 2 * (cd - ab);
-							dcm[2][0] = 2 * (bd - ac);
-							dcm[2][1] = 2 * (ab + cd);
-							dcm[2][2] = aa - bb - cc + dd;
-
-							//float phi_val = float(atan2f(dcm[2][1], dcm[2][2]));
-							float theta_val = float(asinf(-dcm[2][0]));
-							float psi_val = float(atan2f(dcm[1][0], dcm[0][0]));
-							float pi = float(M_PI);
-
-							if (float(fabs(theta_val - pi / float(2))) < float(1.0e-3)) {
-								//phi_val = float(0.0);
-								psi_val = float(atan2f(dcm[1][2], dcm[0][2]));
-
-							} else if (float(fabs(theta_val + pi / float(2))) < float(1.0e-3)) {
-								//phi_val = float(0.0);
-								psi_val = float(atan2f(-dcm[1][2], -dcm[0][2]));
-							}
-							_mc_yaw = psi_val;
-							//printf("roll = %3.6f, pitch = %3.6f, yaw = %3.6f\n",math::degrees((double)phi_val), math::degrees((double)theta_val), math::degrees((double)psi_val));
-						}
-						send_state_packet();
-						//send_State_packet() //all state;
-					}
-				}
-				m_bInterface_Processing = true;
+				_actuator_pwm[i] = actuators.output[i];
 			}
 
-			if(m_bInterface_Processing) {
-				if(!armed.armed) {
-					if(m_bSendStopFlag < 0) {
-						stop_flag_cmd = true;
-						send_stop_packet(stop_flag_cmd);
-						m_bSendStopFlag = -1;
-					}
-					//m_bSendMissionInfo = -1;
-					//m_bSendMissionFlag = -1;
-					//m_bReceivedMissionFlag_ACK = -1;
-					//m_bReceivedStopACK = -1;
-				}
-			}
-			if(m_bReceivedStopACK > 0) {
-				m_bInterface_Processing = false;
-			}
+			//send_pwm_packet(1);
 		}
 	}
+
+
 	return 0;
 }
 
@@ -936,23 +526,6 @@ int16_t SERIAL_COM::RxInt16(unsigned char MSB, unsigned char LSB)
 	return (dummy1 <<8) | dummy2;
 }
 
-unsigned short SERIAL_COM::TxFloat32(unsigned short address, float value, unsigned char *p)
-{
-	unsigned short *p1, *p2;
-	unsigned short lv[4];
-
-	p1 = (unsigned short*)&value;
-	p2 = lv;
-
-	*p2++ = *(p1+0)&0xFF;	*p2++ = *(p1+0)>>8;
-	*p2++ = *(p1+1)&0xFF;	*p2++ = *(p1+1)>>8;
-
-	for(int i = 0; i < 4; i++)
-	{
-		*p++ = lv[i] &0xFF;
-	}
-	return (address + 4);
-}
 
 unsigned short SERIAL_COM::TxUint32(unsigned short address, unsigned int value, unsigned char *p)
 {
@@ -994,368 +567,143 @@ unsigned short SERIAL_COM::UpdateCRC(unsigned short crc, unsigned char bytedata)
 	return crc;
 }
 
-unsigned int SERIAL_COM::Interface_packet_parser(unsigned char *buf)
+unsigned int SERIAL_COM::Hils_packet_parser(unsigned char *buf)
 {
 	float *float_ptr;
 
-	//float roll_cmd = 0.0f, pitch_cmd = 0.0f, yaw_cmd = 0.0f;
-	//float es = 0.0f, ed = 0.0f;
-	//float sdot = 0.0f, ud = 0.0f, vd = 0.0f, omegad = 0.0f;
+	int16_t roll_angle, pitch_angle, yaw_angle;
+	int16_t roll_rate, pitch_rate, yaw_rate;
+	int16_t a_n, a_e, a_d;
+	int16_t v_n, v_e, v_d;
+	float latitude, longitude, altitude;
+	unsigned int muxidx;
 
-	int pathidx;
-	char mflag;
-	int k;
-	int l;
-	float alpha;
-	bool isValidPoint = false;
-	uint8_t isLastPoint = 0;
-//	uint8_t length;
+	muxidx = ((int16_t)buf[2] << 8) | (int16_t)buf[3];
 
-	uint8_t packet_id;
-
-	//length = (uint8_t)buf[2];
-	//printf("length = %d\n",length);
-
-
-	packet_id = (uint8_t)buf[3];
-
-	//printf("ID = %d\n",packet_id);
 	float_ptr  = (float*)&buf[4];
 
-	if(packet_id == 0) {
-		_statusJetson = (uint8_t)buf[4];
+	latitude = *(float_ptr+0);		// 4  4567
+	longitude = *(float_ptr+1);		// 8  891011
+	altitude = *(float_ptr+2);		// 12 12131415
 
-		if(_prev_statusJetson !=_statusJetson) {
-			_mavLog_status_flag = false;
-			//mavlink_log_info(&_mavlink_log_pub, "(%d)Jetson TX2 Status", (int)_statusJetson);
-		}
+	roll_angle = ((int16_t)buf[16] << 8) | (int16_t)buf[17];
+	pitch_angle =  ((int16_t)buf[18] << 8) | (int16_t)buf[19];
+	yaw_angle =  ((int16_t)buf[20] << 8) | (int16_t)buf[21];
 
-		if(!_mavLog_status_flag) {
-			mavlink_log_info(&_mavlink_log_pub, "(%d)Jetson TX2 Status", (int)_statusJetson);
-			_mavLog_status_flag = true;
-		}
+	roll_rate =  ((int16_t)buf[22] << 8) | (int16_t)buf[23];
+	pitch_rate = ((int16_t)buf[24] << 8) | (int16_t)buf[25];
+	yaw_rate = ((int16_t)buf[26] << 8) | (int16_t)buf[27];
 
-		_prev_statusJetson = _statusJetson;
-	}
-	else if(packet_id == 1)
+	a_n = ((int16_t)buf[28] << 8) | (int16_t)buf[29];
+	a_e = ((int16_t)buf[30] << 8) | (int16_t)buf[31];
+	a_d = ((int16_t)buf[32] << 8) | (int16_t)buf[33];
+
+	v_n = ((int16_t)buf[34] << 8) | (int16_t)buf[35];
+	v_e = ((int16_t)buf[36] << 8) | (int16_t)buf[37];
+	v_d = ((int16_t)buf[38] << 8) | (int16_t)buf[39];
+
+	struct serial_com_s report = {};
+	report.timestamp = hrt_absolute_time();
+
+	report.roll_angle = roll_angle; //degree
+	report.pitch_angle = pitch_angle; //degree
+	report.yaw_angle = yaw_angle; //degree
+
+	report.roll_rate = roll_rate;
+	report.pitch_rate = pitch_rate;
+	report.yaw_rate = yaw_rate;
+
+	report.x_n = a_n; //cm/s^2
+	report.y_e = a_e; //cm/s^2
+	report.z_d = a_d; //cm/s^2
+
+	report.v_n = v_n; //cm/s
+	report.v_e = v_e; //cm/s
+	report.v_d = v_d; //cm/s
+
+	report.latitude = latitude;
+	report.longitude = longitude;
+	report.altitude = altitude;
+
+
+	if (_serial_com_topic != nullptr)
 	{
-		//printf("debug=%d\n",2);
-		m_bReceivedMissionInfoACK = 1;
-		m_bSendMissionInfo = 1;
-		mavlink_log_info(&_mavlink_log_pub, "Jetson TX2 received mission info");
-	}
+		orb_publish(ORB_ID(serial_com), _serial_com_topic, &report);
 
-	else if(packet_id == 2)
-	{
-		m_bReceivedMissionFlag_ACK = 1;
-		m_bSendMissionFlag = 1;
-		mavlink_log_info(&_mavlink_log_pub, "Jetson TX2 received mission flag");
-	}
-	else if(packet_id == 3) {
-		_CalcPathFlag = -1;
-		m_bCalcPathFlag = 1;
-		mavlink_log_info(&_mavlink_log_pub, "Jetson TX2 received calculate next path");
-	}
-
-	else if(packet_id == 4)
-	{
-		alpha = *(float_ptr+0); //4 5 6 7
-		pathidx = (int)(buf[8] << 24) | (int)(buf[9] << 16) | (int)(buf[10] << 8) | (int)buf[11]; //8 9 10 11
-		mflag = (char)buf[12]; //12
-		k = (int)(buf[13] << 24) | (int)(buf[14] << 16) | (int)(buf[15] << 8) | (int)buf[16]; //13 14 15 16
-		l = (int)(buf[17] << 24) | (int)(buf[18] << 16) | (int)(buf[19] << 8) | (int)buf[20]; //17 18 19 20
-		isLastPoint = (uint8_t)buf[21];
-		isValidPoint = (bool)buf[22];
-
-		struct avoidance_path_s report = {};
-		report.timestamp = hrt_absolute_time();
-
-		report.pathidx = pathidx;
-		report.mflag = mflag;
-		report.k = k;
-		report.l = l;
-		report.alpha = alpha;
-		report.isLastPoint = isLastPoint;
-		report.isValidPoint = isValidPoint;
-
-		if (_serial_com_topic != nullptr)
+		if (log_status)
 		{
-
-			orb_publish(ORB_ID(avoidance_path), _serial_com_topic, &report);
-			mavlink_log_info(&_mavlink_log_pub, "calculate path complete");
-			printf("receive path\n");
-			printf("subscribe path\n");
-			printf("path index = %d\n",report.pathidx);
-			printf("mflag = %d\n",(int)report.mflag);
-			printf("k = %d\n",report.k);
-			printf("l = %d\n",report.l);
-			printf("isLastPoint = %d\n",(int)report.isLastPoint);
-			printf("isValidPoint = %d\n",(int)report.isValidPoint);
+			warnx("p=%d, q=%d, r=%d", report.roll_rate,report.pitch_rate,report.yaw_rate); // 0 3
 		}
-
-		else
-		{
-			_serial_com_topic = orb_advertise_multi(ORB_ID(avoidance_path), &report, &_orb_class_instance, ORB_PRIO_MAX);
-
-			if (_serial_com_topic == nullptr)
-			{
-				DEVICE_DEBUG("ADVERT FAIL");
-			}
-		}
-	} else if(packet_id == 5) {
-		m_bSendStopFlag = 1;
-		m_bReceivedStopACK = 1;
 	}
-	return packet_id;
+	else
+	{
+		_serial_com_topic = orb_advertise_multi(ORB_ID(serial_com), &report,
+						 &_orb_class_instance, ORB_PRIO_MAX);
+
+		if (_serial_com_topic == nullptr)
+		{
+			DEVICE_DEBUG("ADVERT FAIL");
+		}
+	}
+
+	return muxidx;
 }
 
-unsigned int SERIAL_COM::send_mission_info_packet(void)
+unsigned int SERIAL_COM::send_pwm_packet(unsigned int muxidx)
 {
 	int ret = 0;
 
-	build_mission_info_packet();
+	unsigned short test[8];
+
+	for (int i=0; i<8; i++)
+	{
+		test[i] = (unsigned short)(_actuator_pwm[i]*10.0f);
+	}
+
+	// Build packet
+	build_HILS_packet(&test[0]);
+
 	// Send packet
-	ret = ::write(_fd, &_InterfaceTxBuffer, _HilsTx_FrameLength);
+	ret = ::write(_fd, &_HilsTxBuffer, _HilsTx_FrameLength);
 
 	return ret;
 }
 
-unsigned int SERIAL_COM::send_mission_flag_packet(uint8_t mission_flag_cmd)
-{
-	int ret = 0;
-
-	build_mission_flag_packet(mission_flag_cmd);
-	// Send packet
-	ret = ::write(_fd, &_InterfaceTxBuffer, _HilsTx_FrameLength);
-
-	return ret;
-}
-
-unsigned int SERIAL_COM::send_stop_packet(uint8_t stop_flag_cmd)
-{
-	int ret = 0;
-
-	//Total  7 bytes
-
-	int i;
-	unsigned short crc = 0x0;
-	unsigned short packet_len = 0;
-
-	_InterfaceTxBuffer[packet_len++] = 0x7E; //0
-	_InterfaceTxBuffer[packet_len++] = 0x81; //1
-
-	// Data length
-	packet_len = TxUint8(packet_len, 0, &_InterfaceTxBuffer[packet_len]); //2
-
-	// Data ID
-	packet_len = TxUint8(packet_len, 4, &_InterfaceTxBuffer[packet_len]); //3
-
-	// Data
-	packet_len = TxUint8(packet_len, stop_flag_cmd, &_InterfaceTxBuffer[packet_len]); //4
-
-
-	_InterfaceTxBuffer[2] = packet_len+2;
-
-	for ( i = 2 ; i < packet_len; i++)
-		crc = UpdateCRC(crc, _InterfaceTxBuffer[i]);
-
-	// Add CRC bytes
-	_InterfaceTxBuffer[packet_len++] = (crc>>8) & 0xFF; //5
-	_InterfaceTxBuffer[packet_len++] = crc & 0xFF; //6
-
-	// Update the frame length
-	_HilsTx_FrameLength = packet_len;
-	// Send packet
-	ret = ::write(_fd, &_InterfaceTxBuffer, _HilsTx_FrameLength);
-
-	return ret;
-}
-
-unsigned int SERIAL_COM::send_calculate_path(uint8_t command_calc_path)
-{
-	int ret = 0;
-	int i;
-	unsigned short crc = 0x0;
-	unsigned short packet_len = 0;
-
-	_InterfaceTxBuffer[packet_len++] = 0x7E; //0
-	_InterfaceTxBuffer[packet_len++] = 0x81; //1
-
-	// Data length
-	packet_len = TxUint8(packet_len, 0, &_InterfaceTxBuffer[packet_len]); //2
-
-	// Data ID
-	packet_len = TxUint8(packet_len, 3, &_InterfaceTxBuffer[packet_len]); //3
-
-	// Data
-	packet_len = TxUint8(packet_len, command_calc_path, &_InterfaceTxBuffer[packet_len]); //4
-
-
-	_InterfaceTxBuffer[2] = packet_len+2;
-
-	for ( i = 2 ; i < packet_len; i++)
-		crc = UpdateCRC(crc, _InterfaceTxBuffer[i]);
-
-	// Add CRC bytes
-	_InterfaceTxBuffer[packet_len++] = (crc>>8) & 0xFF; //5
-	_InterfaceTxBuffer[packet_len++] = crc & 0xFF; //6
-
-	// Update the frame length
-	_HilsTx_FrameLength = packet_len;
-	// Send packet
-	ret = ::write(_fd, &_InterfaceTxBuffer, _HilsTx_FrameLength);
-
-	return ret;
-}
-
-
-unsigned int SERIAL_COM::send_state_packet()
-{
-	int ret = 0;
-
-	build_state_packet();
-	// Send packet
-	ret = ::write(_fd, &_InterfaceTxBuffer, _HilsTx_FrameLength);
-
-	return ret;
-}
-
-void SERIAL_COM::build_mission_info_packet()
-
+void SERIAL_COM::build_HILS_packet(unsigned short *pwm_data)
 {
 	int i;
 	unsigned short crc = 0x0;
 	unsigned short packet_len = 0;
 
-	//total 66 bytes
-
-	_InterfaceTxBuffer[packet_len++] = 0x7E; //0
-	_InterfaceTxBuffer[packet_len++] = 0x81; //1
+	_HilsTxBuffer[packet_len++] = 0x7E;
+	_HilsTxBuffer[packet_len++] = 0x81;
 
 	// Data length
-	packet_len = TxUint8(packet_len, 0, &_InterfaceTxBuffer[packet_len]); //2
-
-	// ID
-	packet_len = TxUint8(packet_len, 0, &_InterfaceTxBuffer[packet_len]); //3
+	packet_len = TxUint8(packet_len, 0, &_HilsTxBuffer[packet_len]);
 
 	// Data
-	packet_len = TxFloat32(packet_len, _mission_area_NW[0], &_InterfaceTxBuffer[packet_len]); //4 5 6 7
-	packet_len = TxFloat32(packet_len, _mission_area_NW[1], &_InterfaceTxBuffer[packet_len]); //8 9 10 11
+	packet_len = TxUint16(packet_len, pwm_data[0], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[1], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[2], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[3], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[4], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[5], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[6], &_HilsTxBuffer[packet_len]);
+	packet_len = TxUint16(packet_len, pwm_data[7], &_HilsTxBuffer[packet_len]);
 
-	packet_len = TxFloat32(packet_len, _mission_area_NE[0], &_InterfaceTxBuffer[packet_len]); //12 13 14 15
-	packet_len = TxFloat32(packet_len, _mission_area_NE[1], &_InterfaceTxBuffer[packet_len]); //16 17 18 19
-
-	packet_len = TxFloat32(packet_len, _mission_area_SW[0], &_InterfaceTxBuffer[packet_len]); //20 21 22 23
-	packet_len = TxFloat32(packet_len, _mission_area_SW[1], &_InterfaceTxBuffer[packet_len]); //24 25 26 27
-
-	packet_len = TxFloat32(packet_len, _mission_area_SE[0], &_InterfaceTxBuffer[packet_len]); //28 29 30 31
-	packet_len = TxFloat32(packet_len, _mission_area_SE[1], &_InterfaceTxBuffer[packet_len]); //32 33 34 35
-
-	packet_len = TxFloat32(packet_len, _start_position[0], &_InterfaceTxBuffer[packet_len]); //36 37 38 39
-	packet_len = TxFloat32(packet_len, _start_position[1], &_InterfaceTxBuffer[packet_len]); //40 41 42 43
-
-	packet_len = TxFloat32(packet_len, _end_position[0], &_InterfaceTxBuffer[packet_len]); //44 45 46 47
-	packet_len = TxFloat32(packet_len, _end_position[1], &_InterfaceTxBuffer[packet_len]); //48 49 50 51
-
-	packet_len = TxFloat32(packet_len, _home_position[0], &_InterfaceTxBuffer[packet_len]); //52 53 54 55
-	packet_len = TxFloat32(packet_len, _home_position[1], &_InterfaceTxBuffer[packet_len]); //56 57 58 59
-	packet_len = TxFloat32(packet_len, _home_position[2], &_InterfaceTxBuffer[packet_len]); //60 61 62 63
-
-	packet_len = TxFloat32(packet_len, _cellwidth, &_InterfaceTxBuffer[packet_len]); //64 65 66 67
-	packet_len = TxUint32(packet_len, _width, &_InterfaceTxBuffer[packet_len]); //68 69 70 71
-	packet_len = TxUint32(packet_len, _height, &_InterfaceTxBuffer[packet_len]); //72 73 74 75
-	packet_len = TxUint32(packet_len, _thres0, &_InterfaceTxBuffer[packet_len]); //76 77 78 79
-	packet_len = TxUint32(packet_len, _thresd, &_InterfaceTxBuffer[packet_len]); //80 81 82 83
-
-	_InterfaceTxBuffer[2] = packet_len+2;
+	_HilsTxBuffer[2] = packet_len+2;
 
 	for ( i = 2 ; i < packet_len; i++)
-		crc = UpdateCRC(crc, _InterfaceTxBuffer[i]);
+		crc = UpdateCRC(crc, _HilsTxBuffer[i]);
 
 	// Add CRC bytes
-	_InterfaceTxBuffer[packet_len++] = (crc>>8) & 0xFF; //84
-	_InterfaceTxBuffer[packet_len++] = crc & 0xFF; //85
+	_HilsTxBuffer[packet_len++] = (crc>>8) & 0xFF;
+	_HilsTxBuffer[packet_len++] = crc & 0xFF;
 
 	// Update the frame length
 	_HilsTx_FrameLength = packet_len;
 
-
 }
-
-void SERIAL_COM::build_mission_flag_packet(uint8_t mission_flag_cmd)
-{
-	//Total  7 bytes
-
-	int i;
-	unsigned short crc = 0x0;
-	unsigned short packet_len = 0;
-
-	_InterfaceTxBuffer[packet_len++] = 0x7E; //0
-	_InterfaceTxBuffer[packet_len++] = 0x81; //1
-
-	// Data length
-	packet_len = TxUint8(packet_len, 0, &_InterfaceTxBuffer[packet_len]); //2
-
-	// Data ID
-	packet_len = TxUint8(packet_len, 1, &_InterfaceTxBuffer[packet_len]); //3
-
-	// Data
-	packet_len = TxUint8(packet_len, mission_flag_cmd, &_InterfaceTxBuffer[packet_len]); //4
-
-
-	_InterfaceTxBuffer[2] = packet_len+2;
-
-	for ( i = 2 ; i < packet_len; i++)
-		crc = UpdateCRC(crc, _InterfaceTxBuffer[i]);
-
-	// Add CRC bytes
-	_InterfaceTxBuffer[packet_len++] = (crc>>8) & 0xFF; //5
-	_InterfaceTxBuffer[packet_len++] = crc & 0xFF; //6
-
-	// Update the frame length
-	_HilsTx_FrameLength = packet_len;
-
-
-}
-
-void SERIAL_COM::build_state_packet()
-{
-	//Total 30 bytes
-	int i;
-	unsigned short crc = 0x0;
-	unsigned short packet_len = 0;
-
-
-	_InterfaceTxBuffer[packet_len++] = 0x7E; //0
-	_InterfaceTxBuffer[packet_len++] = 0x81; //1
-
-	// Data length
-	packet_len = TxUint8(packet_len, 0, &_InterfaceTxBuffer[packet_len]); //2
-
-	// Data ID
-	packet_len = TxUint8(packet_len, 2, &_InterfaceTxBuffer[packet_len]); //3
-
-	// Data
-	packet_len = TxFloat32(packet_len, _mc_lat, &_InterfaceTxBuffer[packet_len]); //4 5 6 7
-	packet_len = TxFloat32(packet_len, _mc_lon, &_InterfaceTxBuffer[packet_len]); //8 9 10 11
-	packet_len = TxFloat32(packet_len, _mc_alt, &_InterfaceTxBuffer[packet_len]); //12 13 14 15
-	packet_len = TxFloat32(packet_len, _mc_yaw, &_InterfaceTxBuffer[packet_len]); //16 17 18 19
-
-	_InterfaceTxBuffer[2] = packet_len+2;
-
-	for ( i = 2 ; i < packet_len; i++)
-		crc = UpdateCRC(crc, _InterfaceTxBuffer[i]);
-
-	// Add CRC bytes
-	_InterfaceTxBuffer[packet_len++] = (crc>>8) & 0xFF; //28
-	_InterfaceTxBuffer[packet_len++] = crc & 0xFF; //29
-
-	// Update the frame length
-	_HilsTx_FrameLength = packet_len;
-
-
-}
-
 
 int
 SERIAL_COM::collect()
@@ -1363,7 +711,7 @@ SERIAL_COM::collect()
 	int ret;
 	int i;
 	unsigned int 	crc_index;
-	//unsigned int 	muxidx;
+	unsigned int 	muxidx;
 
 	perf_begin(_sample_perf);
 
@@ -1378,79 +726,88 @@ SERIAL_COM::collect()
 
 	bool valid = true;
 
-	if(ret > 0)
+	for (i = 0; i < ret; i++)
 	{
-		for (i = 0; i < ret; i++)
+		// Put the read binary data into packet
+		_HilsRxBuffer[_HilsRxBuf_EndPtr++] = readbuf[i];
+		_HilsRxBuf_EndPtr %= HILS_RXBUF_SIZE;
+
+		// Get hils packet
+		while (_HilsRxBuf_EndPtr != _HilsRxBuf_StartPtr)
 		{
-			// Put the read binary data into packet
-			_InterfaceRxBuffer[_InterfaceRxBuf_EndPtr++] = readbuf[i];
-			_InterfaceRxBuf_EndPtr %= INTERFACE_RXBUF_SIZE;
-
-			// Get hils packet
-			while (_InterfaceRxBuf_EndPtr != _InterfaceRxBuf_StartPtr)
+			if (crc_flag_Hils == 0)
 			{
-				if (crc_flag_Hils == 0)
+				frame_sync_Hils = (frame_sync_Hils << 8) | _HilsRxBuffer[_HilsRxBuf_StartPtr++];
+				_HilsRxBuf_StartPtr %= HILS_RXBUF_SIZE;
+				if (frame_sync_Hils == 0x7E81)
 				{
-					frame_sync_Hils = (frame_sync_Hils << 8) | _InterfaceRxBuffer[_InterfaceRxBuf_StartPtr++];
-					_InterfaceRxBuf_StartPtr %= INTERFACE_RXBUF_SIZE;
-					if (frame_sync_Hils == 0x7E81)
-					{
-						p_gse = _Interface_packet_buf + 2;
-						hils_pktlen = 2;
-						crc_Hils = 0;
-						crc_flag_Hils = 1; // Ready for CRC test
-					}
+					//warnx("\n %d", 2);
+					p_gse = packet_buf + 2;
+					hils_pktlen = 2;
+					crc_Hils = 0;
+					crc_flag_Hils = 1; // Ready for CRC test
 				}
-				else
+			}
+			else
+			{
+				*p_gse = _HilsRxBuffer[_HilsRxBuf_StartPtr++];
+				_HilsRxBuf_StartPtr %= HILS_RXBUF_SIZE;
+
+				crc_index = (crc_Hils>>8)^(*p_gse++);
+				crc_Hils = (crc_Hils<<8)^crc_table[crc_index & 0x00FF];
+				if ((++hils_pktlen) >= HILS_PACKET_SIZE)
 				{
-					*p_gse = _InterfaceRxBuffer[_InterfaceRxBuf_StartPtr++];
-					_InterfaceRxBuf_StartPtr %= INTERFACE_RXBUF_SIZE;
-
-					crc_index = (crc_Hils>>8)^(*p_gse++);
-					crc_Hils = (crc_Hils<<8)^crc_table[crc_index & 0x00FF];
-
-					if ((++hils_pktlen) >= _Interface_packet_buf[2])
+					//warnx("\n %d", 4);
+					if ((crc_Hils&0xFFFF) == 0)		// Success on receiving a complete packet
 					{
-						if ((crc_Hils&0xFFFF) == 0)		// Success on receiving a complete packet
+						//warnx("\n %d", 5);
+						p_gse = packet_buf + 2;
+						packet_buf[0] = 0x7E;
+						packet_buf[1] = 0x81;
+
+						//muxidx = Hils_packet_parser(&packet_buf[0]);
+						muxidx = Hils_packet_parser(&packet_buf[0]);
+
+						if (tx_status)
 						{
-							p_gse = _Interface_packet_buf + 2;
-							_Interface_packet_buf[0] = 0x7E;
-							_Interface_packet_buf[1] = 0x81;
-							Interface_packet_parser(&_Interface_packet_buf[0]);
-							//printf("receieved = %d\n", 000);
-							valid = true;
+							send_pwm_packet(muxidx);
 						}
-						crc_flag_Hils = 0; // Ready for search 0x7E81
-						hils_pktlen = 0;
-						frame_sync_Hils = 0;
+						valid = true;
+
 					}
+					crc_flag_Hils = 0; // Ready for search 0x7E81
+					hils_pktlen = 0;
+					frame_sync_Hils = 0;
 				}
 			}
 		}
-
 	}
+	//warnx("\n crc = %x, ret = %d", crc_Hils, ret);
 
 	perf_end(_sample_perf);
 
 	if (!valid) {
 		return -EAGAIN;
 	}
+	//warnx("\n %d", 6);
 	return OK;
 }
 
 void
-SERIAL_COM::start()
+SERIAL_COM::start_cycle(unsigned delay_ticks)
 {
 	/* reset the report ring and state machine */
 	_collect_phase = false;
+	_measure_phase = false;
 	_reports->flush();
 
-	work_queue(HPWORK, &_work, (worker_t)&SERIAL_COM::cycle_trampoline, this, 1);
+	work_queue(HPWORK, &_work, (worker_t)&SERIAL_COM::cycle_trampoline, this, delay_ticks);
 
 }
 
+
 void
-SERIAL_COM::stop()
+SERIAL_COM::stop_cycle()
 {
 	work_cancel(HPWORK, &_work);
 }
@@ -1469,43 +826,11 @@ SERIAL_COM::cycle()
 
 	/* actuator output subscription is valid? */
 
-	if(_vehicle_control_mode_sub < 0)
+	if (actuator_outputs_fd < 0)
 	{
-		_vehicle_control_mode_sub = orb_subscribe(ORB_ID(vehicle_control_mode));
-		orb_set_interval(_vehicle_control_mode_sub, 200);
-	}
-	if(_armed_sub < 0)
-	{
-		_armed_sub = orb_subscribe(ORB_ID(actuator_armed));
-		orb_set_interval(_armed_sub, 200);
-	}
-
-	if (vehicle_attitude_fd < 0)
-	{
-		/* New subscription */// vehicle_attitude_fd;vehicle_global_position_fd
-		vehicle_attitude_fd = orb_subscribe(ORB_ID(vehicle_attitude));
-		orb_set_interval(vehicle_attitude_fd, 200);
-	}
-	if(vehicle_global_position_fd < 0)
-	{
-		vehicle_global_position_fd = orb_subscribe(ORB_ID(vehicle_global_position));
-		orb_set_interval(vehicle_global_position_fd, 200);
-	}
-
-	if(_Mission_info_sub < 0) {
-		_Mission_info_sub= orb_subscribe(ORB_ID(mission_info));
-	}
-
-	if(_home_pos_sub < 0) {
-		_home_pos_sub = orb_subscribe(ORB_ID(home_position));
-	}
-
-	if(_input_rc_sub < 0) {
-		_input_rc_sub = orb_subscribe(ORB_ID(input_rc));
-	}
-
-	if(_calc_next_path_sub < 0) {
-		_calc_next_path_sub = orb_subscribe(ORB_ID(calculate_next_path));
+		/* New subscription */
+		actuator_outputs_fd = orb_subscribe(ORB_ID(actuator_outputs));
+		orb_set_interval(actuator_outputs_fd, 10);
 	}
 
 	/* fds initialized? */
@@ -1566,7 +891,6 @@ SERIAL_COM::cycle()
 		DEVICE_LOG("measure error");
 	}
 
-
 	/* next phase is collection */
 	_collect_phase = true;
 
@@ -1581,6 +905,7 @@ SERIAL_COM::print_info()
 	perf_print_counter(_comms_errors);
 	printf("poll interval:  %d ticks\n", _measure_ticks);
 	_reports->print_info("report queue");
+	printf("tx_status: %d, log_status: %d\n", tx_status, log_status);
 }
 
 
@@ -1602,7 +927,8 @@ void	reset();
 void	info();
 void 	enable_log();
 void 	disable_log();
-void	interface_test();
+void 	enable_PWMout();
+void 	disable_PWMout();
 
 /**
  * Start the driver.
@@ -1629,7 +955,7 @@ start(const char *port)
 	}
 
 	/* set the poll rate to default, starts automatic data collection */
-	fd = open("/dev/serial_com0", 0);
+	fd = open(SERIAL_DEVICE_PATH, 0);
 
 	warnx("/dev/serial0 open success : %d", fd); //3
 
@@ -1756,7 +1082,7 @@ void test2()
 		/* handle the poll result */
 		if (poll_ret == 0) {
 			/* this means none of our providers is giving us data */
-			PX4_ERR("Got no data within a second");
+			//PX4_ERR("Got no data within a second");
 
 		} else if (poll_ret < 0) {
 			/* this is seriously bad - should be an emergency */
@@ -1788,44 +1114,6 @@ void test2()
 
 	PX4_INFO("exiting");
 
-
-/*
-	for (i = 0; i < 1000; i++)
-	{
-		orb_check(actuator_outputs_sub, &updated);
-
-		if (updated) {
-		orb_copy(ORB_ID(actuator_outputs), actuator_outputs_sub, &actuators);
-
-			PX4_WARN("PWM:\t%f\t%f\t%f\t%f",
-					(double)actuators.output[0],
-					(double)actuators.output[1],
-					(double)actuators.output[2],
-					(double)actuators.output[3]);
-
-		}
-	}
-
-	PX4_INFO("exiting");
-*/
-}
-void interface_test()
-{/*
-	int sz;
-	int fd = open("/dev/ttyS6", O_WRONLY);
-
-	g_dev-> _mc_lat = 37.5f;
-	g_dev-> _mc_lon = 126.5f;
-	g_dev-> _mc_roll = 1.1f;
-	g_dev-> _mc_pitch = 2.1f;
-	g_dev-> _mc_yaw = 3.1f;
-	g_dev->build_state_packet(g_dev-> _mc_lat, g_dev-> _mc_lon, g_dev-> _mc_roll, g_dev-> _mc_pitch, g_dev-> _mc_yaw);
-
-	sz = write(fd, &(g_dev->_InterfaceTxBuffer), g_dev->_HilsTx_FrameLength);
-
-	printf("%d\n", sz);
-	exit(0);
-	*/
 }
 
 void
@@ -1842,9 +1130,23 @@ void disable_log()
 }
 
 void
+enable_PWMout()
+{
+	g_dev->tx_status = 1;
+	exit(0);
+}
+
+void disable_PWMout()
+{
+	g_dev->tx_status = 0;
+	exit(0);
+}
+
+
+void
 reset()
 {
-	int fd = open("/dev/serial_com0", O_RDONLY);
+	int fd = open(SERIAL_DEVICE_PATH, O_RDONLY);
 
 	if (fd < 0) {
 		err(1, "failed ");
@@ -1927,10 +1229,17 @@ serial_com_main(int argc, char *argv[])
 	}
 
 	/*
-	 * Test interface jetson and pixhawk
+	 * Tx PWM enable
 	 */
-	if(!strcmp(argv[1], "interface")) {
-		serial_com::interface_test();
+	if (!strcmp(argv[1], "txON")) {
+		serial_com::enable_PWMout();
+	}
+
+	/*
+	 * Tx PWM disable
+	 */
+	if (!strcmp(argv[1], "txOFF")) {
+		serial_com::disable_PWMout();
 	}
 
 	/*
@@ -1940,5 +1249,5 @@ serial_com_main(int argc, char *argv[])
 		serial_com::info();
 	}
 
-	errx(1, "unrecognized command, try 'start', 'test', 'reset' or 'info' or 'logon' or 'logoff' or 'test2'");
+	errx(1, "unrecognized command, try 'start', 'test', 'reset' or 'info' or 'logon' or 'logoff' or 'test2' or 'txON' or 'txOFF");
 }
