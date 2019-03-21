@@ -413,67 +413,6 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 	return CDev::ioctl(filp, cmd, arg);
 }
 
-/*
-ssize_t
-SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
-{
-	unsigned count = buflen / sizeof(struct serial_com_s);
-	struct serial_com_s *rbuf = reinterpret_cast<struct serial_com_s *>(buffer);
-	int ret = 0;
-
-	if (count < 1) {
-		return -ENOSPC;
-	}
-
-	if (_measure_ticks > 0)
-	{
-			 // While there is space in the caller's buffer, and reports, copy them.
-			 // Note that we may be pre-empted by the workq thread while we are doing this;
-			 // we are careful to avoid racing with them.
-
-		while (count--) {
-					if (_reports->get(rbuf)) {
-						ret += sizeof(*rbuf);
-						rbuf++;
-					}
-				}
-
-
-			// if there was no data, warn the caller
-			warnx("SERIAL_COM::read while out ret : %d", ret); //64
-			return ret ? ret : -EAGAIN; // try again
-	}
-*/
-	/* manual measurement - run one conversion */
-/*
-	do {
-		_reports->flush();
-
-		warnx("read start");
-		/* wait for it to complete */
-		//usleep(SERIAL_COM_CONVERSION_INTERVAL);
-
-		/* run the collection phase */
-		//if (OK != collect())
-		//{
-		//	warnx("collect %d", collect());
-		//	ret = -EIO;
-		//	break;
-		//}
-
-		/* state machine will have generated a report, copy it out */
-/*		if (_reports->get(rbuf)) {
-			ret = sizeof(*rbuf);
-		}
-
-		warnx("SERIAL_COM::collect ret, collect : %d, %d" , ret,collect()); // -1 3 10
-
-	} while (0);
-
-	return ret;
-}
-*/
-
 int
 SERIAL_COM::measure()
 {
