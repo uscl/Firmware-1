@@ -57,16 +57,25 @@
 #include <uORB/topics/ekf2_timestamps.h>
 #include <uORB/topics/ekf_gps_position.h>
 #include <uORB/topics/estimator_status.h>
+#include <uORB/topics/ekf_gps_drift.h>
+#include <uORB/topics/landing_target_pose.h>
+#include <uORB/topics/optical_flow.h>
 #include <uORB/topics/parameter_update.h>
+#include <uORB/topics/sensor_bias.h>
 #include <uORB/topics/sensor_combined.h>
+#include <uORB/topics/sensor_selection.h>
+#include <uORB/topics/vehicle_air_data.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/vehicle_gps_position.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/vehicle_magnetometer.h>
+#include <uORB/topics/vehicle_odometry.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/wind_estimate.h>
+#include <uORB/topics/serial_com.h>
+#include <uORB/topics/home_position.h> // Added for home position polling
 
 // defines used to specify the mask position for use of different accuracy metrics in the GPS blending algorithm
 #define BLEND_MASK_USE_SPD_ACC      1
@@ -109,10 +118,11 @@ public:
 
 	int print_status() override;
 
-private:
-	bool publish_attitude(const sensor_combined_s &sensors, const hrt_abstime &now);
+	void LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result);
 
-	const Vector3f get_vel_body_wind();
+private:
+	template<typename Param>
+	bool publish_attitude(const sensor_combined_s &sensors, const hrt_abstime &now);
 
 	bool 	_replay_mode = false;			///< true when we use replay data from a log
 
@@ -124,43 +134,18 @@ private:
 	perf_counter_t _perf_update_data;
 	perf_counter_t _perf_ekf_update;
 
-	// Used to check, save and use learned magnetometer biases
-    //hrt_abstime _last_magcal_us = 0;	///< last time the EKF was operating a mode that estimates magnetomer biases (uSec)
-	hrt_abstime _total_cal_time_us = 0;	///< accumulated calibration time since the last save
-
 	// set pose/velocity as invalid if standard deviation is bigger than max_std_dev
 	// TODO: the user should be allowed to set these values by a parameter
 	static constexpr float ep_max_std_dev = 100.0f;	///< Maximum permissible standard deviation for estimated position
 	static constexpr float eo_max_std_dev = 100.0f;	///< Maximum permissible standard deviation for estimated orientation
 	//static constexpr float ev_max_std_dev = 100.0f;	///< Maximum permissible standard deviation for estimated velocity
 
-	// GPS blending and switching
-	gps_message _gps_state[GPS_MAX_RECEIVERS] {}; ///< internal state data for the physical GPS
-	gps_message _gps_blended_state{};		///< internal state data for the blended GPS
-	gps_message _gps_output[GPS_MAX_RECEIVERS + 1] {}; ///< output state data for the physical and blended GPS
-	Vector2f _NE_pos_offset_m[GPS_MAX_RECEIVERS] = {}; ///< Filtered North,East position offset from GPS instance to blended solution in _output_state.location (m)
-	float _hgt_offset_mm[GPS_MAX_RECEIVERS] = {};	///< Filtered height offset from GPS instance relative to blended solution in _output_state.location (mm)
-	Vector3f _blended_antenna_offset = {};		///< blended antenna offset
-	float _blend_weights[GPS_MAX_RECEIVERS] = {};	///< blend weight for each GPS. The blend weights must sum to 1.0 across all instances.
-	uint64_t _time_prev_us[GPS_MAX_RECEIVERS] = {};	///< the previous value of time_us for that GPS instance - used to detect new data.
-	uint8_t _gps_best_index = 0;			///< index of the physical receiver with the lowest reported error
-	uint8_t _gps_select_index = 0;			///< 0 = GPS1, 1 = GPS2, 2 = blended
-	uint8_t _gps_time_ref_index =
-		0;		///< index of the receiver that is used as the timing reference for the blending update
-	uint8_t _gps_oldest_index = 0;			///< index of the physical receiver with the oldest data
-	uint8_t _gps_newest_index = 0;			///< index of the physical receiver with the newest data
-	uint8_t _gps_slowest_index = 0;			///< index of the physical receiver with the slowest update rate
-	float _gps_dt[GPS_MAX_RECEIVERS] = {};		///< average time step in seconds.
-	bool  _gps_new_output_data = false;		///< true if there is new output data for the EKF
-
-	int32_t _gps_alttitude_ellipsoid[GPS_MAX_RECEIVERS] {};	///< altitude in 1E-3 meters (millimeters) above ellipsoid
-	uint64_t _gps_alttitude_ellipsoid_previous_timestamp[GPS_MAX_RECEIVERS] {}; ///< storage for previous timestamp to compute dt
-	float   _wgs84_hgt_offset = 0;  ///< height offset between AMSL and WGS84
-
 	int _params_sub{-1};
 	int _sensors_sub{-1};
+	int _serial_com_sub{-1};
 	int _status_sub{-1};
 	int _vehicle_land_detected_sub{-1};
+	int _home_position_sub{-1};	// Added for Home position
 
 	// because we can have multiple GPS instances
 	int _gps_subs[GPS_MAX_RECEIVERS] {};
@@ -169,11 +154,13 @@ private:
 	orb_advert_t _att_pub{nullptr};
 	orb_advert_t _wind_pub{nullptr};
 	orb_advert_t _estimator_status_pub{nullptr};
+	orb_advert_t _ekf_gps_drift_pub{nullptr};
+	orb_advert_t _estimator_innovations_pub{nullptr};
 	orb_advert_t _ekf2_timestamps_pub{nullptr};
-//	orb_advert_t _blended_gps_pub{nullptr};
 
 	uORB::Publication<vehicle_local_position_s> _vehicle_local_position_pub;
 	uORB::Publication<vehicle_global_position_s> _vehicle_global_position_pub;
+	uORB::Publication<vehicle_odometry_s> _vehicle_odometry_pub;
 
 	Ekf _ekf;
 
@@ -186,20 +173,21 @@ Ekf2::Ekf2():
 	_perf_update_data(perf_alloc_once(PC_ELAPSED, "EKF2 data acquisition")),
 	_perf_ekf_update(perf_alloc_once(PC_ELAPSED, "EKF2 update")),
 	_vehicle_local_position_pub(ORB_ID(vehicle_local_position)),
-	_vehicle_global_position_pub(ORB_ID(vehicle_global_position)),
-    _params(_ekf.getParamHandle())
+    _vehicle_global_position_pub(ORB_ID(vehicle_global_position))
 {
 	_params_sub = orb_subscribe(ORB_ID(parameter_update));
 	_sensors_sub = orb_subscribe(ORB_ID(sensor_combined));
+	_serial_com_sub = orb_subscribe(ORB_ID(serial_com));
 	_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 	_vehicle_land_detected_sub = orb_subscribe(ORB_ID(vehicle_land_detected));
+	_home_position_sub = orb_subscribe(ORB_ID(home_position)); // Added for Home position
 
 	for (unsigned i = 0; i < GPS_MAX_RECEIVERS; i++) {
 		_gps_subs[i] = orb_subscribe_multi(ORB_ID(vehicle_gps_position), i);
 	}
 
 	// initialise parameter cache
-    //updateParams();
+	updateParams();
 }
 
 Ekf2::~Ekf2()
@@ -209,10 +197,11 @@ Ekf2::~Ekf2()
 
 	orb_unsubscribe(_params_sub);
 	orb_unsubscribe(_sensors_sub);
+	orb_unsubscribe(_serial_com_sub);
 	orb_unsubscribe(_status_sub);
 	orb_unsubscribe(_vehicle_land_detected_sub);
 
-    for (unsigned i = 0; i < GPS_MAX_RECEIVERS; i++) {
+	for (unsigned i = 0; i < GPS_MAX_RECEIVERS; i++) {
 		orb_unsubscribe(_gps_subs[i]);
 	}
 }
@@ -230,8 +219,38 @@ int Ekf2::print_status()
 	return 0;
 }
 
+void Ekf2::LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result)
+{
+	float exp = 0.08181919f;
+	float Ne, Ner;
+	float xe, ye, ze;
+	float xer, yer, zer;
+
+	//double _position_NED[3] = {0.0};
+
+	// LLA[0] = Latitude, LLA[1] = Longitude, LLA[2] = height
+	Ne = 6378137.0f / sqrtf(1.0f-exp*exp*sinf(cur_pos_LLA[0])*sinf(cur_pos_LLA[0]));
+	Ner = 6378137.0f / sqrtf(1.0f-exp*exp*sinf(home_pos_LLA[0])*sinf(home_pos_LLA[0]));
+
+	xe = (Ne + cur_pos_LLA[2])*cosf(cur_pos_LLA[0])*cosf(cur_pos_LLA[1]);
+	ye = (Ne + cur_pos_LLA[2])*cosf(cur_pos_LLA[0])*sinf(cur_pos_LLA[1]);
+	ze = (Ne*(1.0f-exp*exp) + cur_pos_LLA[2])*sinf(cur_pos_LLA[0]);
+
+	xer = (Ner + home_pos_LLA[2])*cosf(home_pos_LLA[0])*cosf(home_pos_LLA[1]);
+	yer = (Ner + home_pos_LLA[2])*cosf(home_pos_LLA[0])*sinf(home_pos_LLA[1]);
+	zer = (Ner*(1.0f-exp*exp) + home_pos_LLA[2])*sinf(home_pos_LLA[0]);
+
+	result[0] = -sinf(home_pos_LLA[0])*cosf(home_pos_LLA[1])*(xe-xer) -sinf(home_pos_LLA[0])*sinf(home_pos_LLA[1])*(ye-yer) + cosf(home_pos_LLA[0])*(ze-zer);
+	result[1] = -sinf(home_pos_LLA[1])*(xe-xer) + cosf(home_pos_LLA[1])*(ye-yer);
+	result[2] = -cosf(home_pos_LLA[0])*cosf(home_pos_LLA[1])*(xe-xer) - cosf(home_pos_LLA[0])*sinf(home_pos_LLA[1])*(ye-yer) - sinf(home_pos_LLA[0])*(ze-zer);
+
+//	return _position_NED;
+}
+
+template<typename Param>
 void Ekf2::run()
 {
+
 	px4_pollfd_struct_t fds[1] = {};
 	fds[0].fd = _sensors_sub;
 	fds[0].events = POLLIN;
@@ -242,6 +261,7 @@ void Ekf2::run()
 	sensor_combined_s sensors = {};
 	vehicle_land_detected_s vehicle_land_detected = {};
 	vehicle_status_s vehicle_status = {};
+	sensor_selection_s sensor_selection = {};
 
 	while (!should_exit()) {
 		int ret = px4_poll(fds, sizeof(fds) / sizeof(fds[0]), 1000);
@@ -263,129 +283,215 @@ void Ekf2::run()
 
 		perf_begin(_perf_update_data);
 
-		bool params_updated = false;
-		orb_check(_params_sub, &params_updated);
-
-		if (params_updated) {
-			// read from param to clear updated flag
-			parameter_update_s update;
-			orb_copy(ORB_ID(parameter_update), _params_sub, &update);
-            //updateParams();
-		}
-
 		orb_copy(ORB_ID(sensor_combined), _sensors_sub, &sensors);
 
-		// ekf2_timestamps (using 0.1 ms relative timestamps)
-		ekf2_timestamps_s ekf2_timestamps = {};
-		ekf2_timestamps.timestamp = sensors.timestamp;
-
-		ekf2_timestamps.distance_sensor_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID;
-		ekf2_timestamps.gps_timestamp_rel = ekf2_timestamps_s::RELATIVE_TIMESTAMP_INVALID;
-
 		// update all other topics if they have new data
-
 		bool vehicle_status_updated = false;
-
 		orb_check(_status_sub, &vehicle_status_updated);
-        if (vehicle_status_updated) orb_copy(ORB_ID(vehicle_status), _status_sub, &vehicle_status);
+		if (vehicle_status_updated) orb_copy(ORB_ID(vehicle_status), _status_sub, &vehicle_status);
+
+		bool serial_com_updated = false;
+		orb_check(_serial_com_sub, &serial_com_updated);
+		if (serial_com_updated)	orb_copy(ORB_ID(serial_com), _serial_com_sub, &_serial_com);
+
+		bool home_position_upodated = false;
+		orb_check(_home_position_sub, &home_position_upodated);
+		if (home_position_upodated) orb_copy(ORB_ID(home_position), _home_position_sub, &_home_position);
 
 		const hrt_abstime now = sensors.timestamp;
 
 		// publish attitude immediately (uses quaternion from output predictor)
-		publish_attitude(sensors, now);
-
+//		publish_attitude(sensors, now);
 
 		// read gps1 data if available
 		bool gps1_updated = false;
 		orb_check(_gps_subs[0], &gps1_updated);
 
-		if (gps1_updated) {
-			vehicle_gps_position_s gps;
-
-			if (orb_copy(ORB_ID(vehicle_gps_position), _gps_subs[0], &gps) == PX4_OK) {
-				_gps_state[0].time_usec = gps.timestamp;
-				_gps_state[0].lat = gps.lat;
-				_gps_state[0].lon = gps.lon;
-				_gps_state[0].alt = gps.alt;
-				_gps_state[0].yaw = gps.heading;
-				_gps_state[0].yaw_offset = gps.heading_offset;
-				_gps_state[0].fix_type = gps.fix_type;
-				_gps_state[0].eph = gps.eph;
-				_gps_state[0].epv = gps.epv;
-				_gps_state[0].sacc = gps.s_variance_m_s;
-				_gps_state[0].vel_m_s = gps.vel_m_s;
-				_gps_state[0].vel_ned[0] = gps.vel_n_m_s;
-				_gps_state[0].vel_ned[1] = gps.vel_e_m_s;
-				_gps_state[0].vel_ned[2] = gps.vel_d_m_s;
-				_gps_state[0].vel_ned_valid = gps.vel_ned_valid;
-				_gps_state[0].nsats = gps.satellites_used;
-				//TODO: add gdop to gps topic
-				_gps_state[0].gdop = 0.0f;
-				_gps_alttitude_ellipsoid[0] = gps.alt_ellipsoid;
-
-				ekf2_timestamps.gps_timestamp_rel = (int16_t)((int64_t)gps.timestamp / 100 - (int64_t)ekf2_timestamps.timestamp / 100);
-			}
-		}
-
-		// check for second GPS receiver data
-		bool gps2_updated = false;
-		orb_check(_gps_subs[1], &gps2_updated);
-
-		if (gps2_updated) {
-			vehicle_gps_position_s gps;
-
-			if (orb_copy(ORB_ID(vehicle_gps_position), _gps_subs[1], &gps) == PX4_OK) {
-				_gps_state[1].time_usec = gps.timestamp;
-				_gps_state[1].lat = gps.lat;
-				_gps_state[1].lon = gps.lon;
-				_gps_state[1].alt = gps.alt;
-				_gps_state[1].yaw = gps.heading;
-				_gps_state[1].yaw_offset = gps.heading_offset;
-				_gps_state[1].fix_type = gps.fix_type;
-				_gps_state[1].eph = gps.eph;
-				_gps_state[1].epv = gps.epv;
-				_gps_state[1].sacc = gps.s_variance_m_s;
-				_gps_state[1].vel_m_s = gps.vel_m_s;
-				_gps_state[1].vel_ned[0] = gps.vel_n_m_s;
-				_gps_state[1].vel_ned[1] = gps.vel_e_m_s;
-				_gps_state[1].vel_ned[2] = gps.vel_d_m_s;
-				_gps_state[1].vel_ned_valid = gps.vel_ned_valid;
-				_gps_state[1].nsats = gps.satellites_used;
-				//TODO: add gdop to gps topic
-				_gps_state[1].gdop = 0.0f;
-				_gps_alttitude_ellipsoid[1] = gps.alt_ellipsoid;
-			}
-		}
-
-        // Only use selected receiver data if it has been updated
-        if ((gps1_updated && _gps_select_index == 0) || (gps2_updated && _gps_select_index == 1)) {
-            _gps_new_output_data = true;
-        } else {
-					_gps_new_output_data = false;
-        }
-
 		bool vehicle_land_detected_updated = false;
 		orb_check(_vehicle_land_detected_sub, &vehicle_land_detected_updated);
-
 		if (vehicle_land_detected_updated) {
-			if (orb_copy(ORB_ID(vehicle_land_detected), _vehicle_land_detected_sub, &vehicle_land_detected) == PX4_OK) {
-				_ekf.set_in_air_status(!vehicle_land_detected.landed);
-			}
+			orb_copy(ORB_ID(vehicle_land_detected), _vehicle_land_detected_sub, &vehicle_land_detected);
 		}
 
 		perf_end(_perf_update_data);
+/*
+		if (serial_com_updated)
+		{
+			// generate attitude publication
+			struct vehicle_attitude_s att = {};
+			matrix::Quaternion<float> q(1.0f, 0.0f, 0.0f, 0.0f);
+			att.timestamp = hrt_absolute_time();
 
-        if (1) {
+			// generate control state data
+			control_state_s ctrl_state = {};
+			ctrl_state.timestamp = hrt_absolute_time();
 
-            //if (control_status.flags.tilt_align)
-            if (1)
-            {
+			// Input data: [deg/sec], with SF 20
+			ctrl_state.roll_rate = (float)_serial_com.roll_rate*0.000872664626f;		// Converted to rad/sec (with SF=0.05)
+			ctrl_state.pitch_rate = (float)_serial_com.pitch_rate*0.000872664626f;		// Converted to rad/sec (with SF=0.05)
+			ctrl_state.yaw_rate = (float)_serial_com.yaw_rate*0.000872664626f;			// Converted to rad/sec (with SF=0.05)
+
+			// Input data: [deg], with SF 100
+			att.roll = (float)_serial_com.roll_angle*0.00017532952f;	// Converted to rad (with SF=0.01)
+			att.pitch = (float)_serial_com.pitch_angle*0.00017532952f;	// Converted to rad (with SF=0.01)
+			att.yaw = (float)_serial_com.yaw_angle*0.00017532952f; 		// Converted to rad (with SF=0.01)
+
+			att.rollspeed 	= ctrl_state.roll_rate;
+			att.pitchspeed 	= ctrl_state.pitch_rate;
+			att.yawspeed 	= ctrl_state.yaw_rate;
+
+			// Publish the attitude data
+			if (_att_pub == nullptr)	_att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
+			else 	orb_publish(ORB_ID(vehicle_attitude), _att_pub, &att);
+
+			float euler_phi		= att.roll;
+			float euler_theta	= att.pitch;
+			float euler_psi		= att.yaw;
+
+			float cosPhi_2 = float(cos(euler_phi*0.5f));
+			float cosTheta_2 = float(cos(euler_theta*0.5f));
+			float cosPsi_2 = float(cos(euler_psi*0.5f));
+			float sinPhi_2 = float(sin(euler_phi*0.5f));
+			float sinTheta_2 = float(sin(euler_theta*0.5f));
+			float sinPsi_2 = float(sin(euler_psi*0.5f));
+			q(0) = cosPhi_2 * cosTheta_2 * cosPsi_2 + sinPhi_2 * sinTheta_2 * sinPsi_2;
+			q(1) = sinPhi_2 * cosTheta_2 * cosPsi_2 - cosPhi_2 * sinTheta_2 * sinPsi_2;
+			q(2) = cosPhi_2 * sinTheta_2 * cosPsi_2 + sinPhi_2 * cosTheta_2 * sinPsi_2;
+			q(3) = cosPhi_2 * cosTheta_2 * sinPsi_2 - sinPhi_2 * sinTheta_2 * cosPsi_2;
+
+			ctrl_state.q[0] = q(0);
+			ctrl_state.q[1] = q(1);
+			ctrl_state.q[2] = q(2);
+			ctrl_state.q[3] = q(3);
+
+			ctrl_state.x_acc = 0.0f;
+			ctrl_state.y_acc = 0.0f;
+			ctrl_state.z_acc = 9.8f;
+
+			// generate vehicle local position data
+			struct vehicle_local_position_s lpos = {};
+			//float pos[3] = {};
+			float vel[3] = {};
+			float home_pos_LLA[3] = {};
+			float pos_LLA[3] = {};
+			float pos_NED[3] = {};
+
+			home_pos_LLA[0] = math::radians(_home_position.lat);
+			home_pos_LLA[1] = math::radians(_home_position.lon);
+			home_pos_LLA[2] = (float)_home_position.alt;
+
+			pos_LLA[0] = math::radians(_serial_com.latitude);
+			pos_LLA[1] = math::radians(_serial_com.longitude);
+			pos_LLA[2] = _serial_com.altitude;
+			LLA2NED(home_pos_LLA, pos_LLA, pos_NED);
+
+			vel[0] = (float)_serial_com.v_n*0.01f;		// Converted to m/sec (SF = 0.01)
+			vel[1] = (float)_serial_com.v_e*0.01f;		// Converted to m/sec (SF = 0.01)
+			vel[2] = (float)_serial_com.v_d*0.01f;		// Converted to m/sec (SF = 0.01)
+
+			// Velocity in body frame
+			//float velocity[3];
+			//_ekf.get_velocity(velocity);
+			Vector3f v_n(vel);
+			matrix::Dcm<float> R_to_body(q.inversed());
+			Vector3f v_b = R_to_body * v_n;
+			ctrl_state.x_vel = v_b(0);
+			ctrl_state.y_vel = v_b(1);
+			ctrl_state.z_vel = v_b(2);
+
+			// Local Position NED
+			ctrl_state.x_pos = pos_LLA[0];
+			ctrl_state.y_pos = pos_LLA[1];
+			ctrl_state.z_pos = pos_LLA[2];
+
+			ctrl_state.x_acc = (float)_serial_com.x_n*0.01f;
+			ctrl_state.x_acc = (float)_serial_com.y_e*0.01f;
+			ctrl_state.x_acc = (float)_serial_com.z_d*0.01f;
+
+			ctrl_state.airspeed_valid = false;//true;
+			//ctrl_state.airspeed 		= _serial_arsp;
+
+			if (_control_state_pub == nullptr) 	_control_state_pub = orb_advertise(ORB_ID(control_state), &ctrl_state);
+			else 	orb_publish(ORB_ID(control_state), _control_state_pub, &ctrl_state);
+
+			// Position of body origin in local NED frame
+			// Generate local position data
+			lpos.timestamp = hrt_absolute_time();
+			lpos.x = pos_NED[0];
+			lpos.y = pos_NED[1];
+			lpos.z = pos_NED[2];
+
+			lpos.vx = vel[0];
+			lpos.vy = vel[1];
+			lpos.vz = vel[2];
+
+			// TODO: better status reporting
+			lpos.xy_valid = true;
+			lpos.z_valid = true;
+			lpos.v_xy_valid = true;
+			lpos.v_z_valid = true;
+
+			// Position of local NED origin in GPS / WGS84 frame
+			// true if position (x, y) is valid and has valid global reference (ref_lat, ref_lon)
+			lpos.xy_global =true;// _ekf.global_position_is_valid();
+			lpos.z_global = true;                                // true if z is valid and has valid global reference (ref_alt)
+			lpos.ref_lat = math::degrees((double)home_pos_LLA[0]);//_serial_com.latitude;//ekf_origin.lat_rad * 180.0 / M_PI; // Reference point latitude in degrees
+			lpos.ref_lon = math::degrees((double)home_pos_LLA[1]);//_serial_com.longitude;//ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
+
+			// The rotation of the tangent plane vs. geographical north
+			lpos.yaw = att.yaw;
+
+			//float terrain_vpos;
+			lpos.dist_bottom_valid = false;//ekf.get_terrain_vert_pos(&terrain_vpos);
+			//lpos.dist_bottom = terrain_vpos - pos[2]; // Distance to bottom surface (ground) in meters
+			lpos.dist_bottom_rate = -vel[2]; // Distance to bottom surface (ground) change rate
+			lpos.surface_bottom_timestamp	= hrt_absolute_time(); // Time when new bottom surface found
+
+			// TODO: uORB definition does not define what these variables are. We have assumed them to be horizontal and vertical 1-std dev accuracy in metres
+			Vector3f pos_var, vel_var;
+			lpos.eph = 0.1f;
+			lpos.epv = 0.1f;
+
+			// publish vehicle local position data
+			if (_lpos_pub == nullptr) {
+				_lpos_pub = orb_advertise(ORB_ID(vehicle_local_position), &lpos);
+			} else {
+				orb_publish(ORB_ID(vehicle_local_position), _lpos_pub, &lpos);
+			}
+
+			// generate and publish global position data
+			struct vehicle_global_position_s global_pos = {};
+
+			global_pos.timestamp = hrt_absolute_time(); // Time of this estimate, in microseconds since system start
+			global_pos.time_utc_usec = gps.time_utc_usec; // GPS UTC timestamp in microseconds
+
+			global_pos.lat = (double)_serial_com.latitude; // Latitude in degrees
+			global_pos.lon = (double)_serial_com.longitude; // Longitude in degrees
+			global_pos.alt = _serial_com.altitude;//_serial_com.altitude; // Altitude AMSL in meters
+
+			global_pos.vel_n = vel[0]; // Ground north velocity, m/s
+			global_pos.vel_e = vel[1]; // Ground east velocity, m/s
+			global_pos.vel_d = vel[2]; // Ground downside velocity, m/s
+			global_pos.yaw = att.yaw; // Yaw in radians -PI..+PI.
+			global_pos.eph = 1.0f;
+			global_pos.epv = 1.0f;
+
+			global_pos.dead_reckoning = false;
+			global_pos.pressure_alt = global_pos.alt;
+
+			if (_vehicle_global_position_pub == nullptr)_vehicle_global_position_pub = orb_advertise(ORB_ID(vehicle_global_position), &global_pos);
+			else	orb_publish(ORB_ID(vehicle_global_position), _vehicle_global_position_pub, &global_pos);
+
+		}
+*/
+		if (updated) {
+
 				// generate vehicle local position data
 				vehicle_local_position_s &lpos = _vehicle_local_position_pub.get();
 
-                lpos.timestamp = now;
+				lpos.timestamp = now;
 
-                // Position of body origin in local NED frame
+				// Position of body origin in local NED frame
 				float position[3];
 				_ekf.get_position(position);
 				const float lpos_x_prev = lpos.x;
@@ -403,49 +509,29 @@ void Ekf2::run()
 
 				// Acceleration of body origin in local NED frame
 				float vel_deriv[3];
-				_ekf.get_vel_deriv_ned(vel_deriv);
 				lpos.ax = vel_deriv[0];
 				lpos.ay = vel_deriv[1];
 				lpos.az = vel_deriv[2];
 
 				// TODO: better status reporting
-                lpos.xy_valid = true;
-                lpos.z_valid = true;
-                lpos.v_xy_valid = true;
-                lpos.v_z_valid = true;
-
-				// Position of local NED origin in GPS / WGS84 frame
-				map_projection_reference_s ekf_origin;
-				uint64_t origin_time;
+				lpos.xy_valid = _ekf.local_position_is_valid() && !_preflt_horiz_fail;
+				lpos.z_valid = !_preflt_vert_fail;
+				lpos.v_xy_valid = _ekf.local_position_is_valid() && !_preflt_horiz_fail;
+				lpos.v_z_valid = !_preflt_vert_fail;
 
 				// true if position (x,y,z) has a valid WGS-84 global reference (ref_lat, ref_lon, alt)
-				const bool ekf_origin_valid = _ekf.get_ekf_origin(&origin_time, &ekf_origin, &lpos.ref_alt);
 				lpos.xy_global = ekf_origin_valid;
 				lpos.z_global = ekf_origin_valid;
 
-				if (ekf_origin_valid && (origin_time > lpos.ref_timestamp)) {
-					lpos.ref_timestamp = origin_time;
-					lpos.ref_lat = ekf_origin.lat_rad * 180.0 / M_PI; // Reference point latitude in degrees
-					lpos.ref_lon = ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
-				}
+				lpos.ref_timestamp = origin_time;
+				lpos.ref_lat = ekf_origin.lat_rad * 180.0 / M_PI; // Reference point latitude in degrees
+				lpos.ref_lon = ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
 
 				// The rotation of the tangent plane vs. geographical north
-				matrix::Quatf q;
-				_ekf.copy_quaternion(q.data());
-
 				lpos.yaw = matrix::Eulerf(q).psi();
 
-				lpos.dist_bottom_valid = _ekf.get_terrain_valid();
-
 				float terrain_vpos;
-				_ekf.get_terrain_vert_pos(&terrain_vpos);
 				lpos.dist_bottom = terrain_vpos - lpos.z; // Distance to bottom surface (ground) in meters
-
-				// constrain the distance to ground to _rng_gnd_clearance
-            //	if (lpos.dist_bottom < _rng_gnd_clearance.get()) {
-                    lpos.dist_bottom = 0;//_rng_gnd_clearance.get();
-                //}
-
 				lpos.dist_bottom_rate = -lpos.vz; // Distance to bottom surface (ground) change rate
 
 				_ekf.get_ekf_lpos_accuracy(&lpos.eph, &lpos.epv);
@@ -458,20 +544,15 @@ void Ekf2::run()
 				_ekf.get_velNE_reset(&lpos.delta_vxy[0], &lpos.vxy_reset_counter);
 
 				// get control limit information
-				_ekf.get_ekf_ctrl_limits(&lpos.vxy_max, &lpos.vz_max, &lpos.hagl_min, &lpos.hagl_max);
-
-				// convert NaN to INFINITY
-                lpos.vxy_max = INFINITY;
-
-                lpos.vz_max = INFINITY;
-                lpos.hagl_min = INFINITY;
-                lpos.hagl_max = INFINITY;
+				lpos.vxy_max = INFINITY;
+				lpos.vz_max = INFINITY;
+				lpos.hagl_min = INFINITY;
+				lpos.hagl_max = INFINITY;
 
 				// publish vehicle local position data
 				_vehicle_local_position_pub.update();
 
-
-                if (_ekf.global_position_is_valid()) {
+				if (_ekf.global_position_is_valid() && !_preflt_fail) {
 					// generate and publish global position data
 					vehicle_global_position_s &global_pos = _vehicle_global_position_pub.get();
 
@@ -484,7 +565,7 @@ void Ekf2::run()
 					global_pos.lat_lon_reset_counter = lpos.xy_reset_counter;
 
 					global_pos.alt = -lpos.z + lpos.ref_alt; // Altitude AMSL in meters
-                    global_pos.alt_ellipsoid = 0.0;//filter_altitude_ellipsoid(global_pos.alt);
+					global_pos.alt_ellipsoid = filter_altitude_ellipsoid(global_pos.alt);
 
 					// global altitude has opposite sign of local down position
 					global_pos.delta_alt = -lpos.delta_z;
@@ -512,6 +593,10 @@ void Ekf2::run()
 				}
 			}
 
+			{
+				// publish all corrected sensor readings and bias estimates after mag calibration is updated above
+
+			}
 
 			// publish estimator status
 			estimator_status_s status;
@@ -523,7 +608,7 @@ void Ekf2::run()
 			// only report enabled GPS check failures (the param indexes are shifted by 1 bit, because they don't include
 			// the GPS Fix bit, which is always checked)
 			status.gps_check_fail_flags &= ((uint16_t)_params->gps_check_mask << 1) | 1;
-            status.control_mode_flags = 1;//control_status.value;
+			status.control_mode_flags = control_status.value;
 			_ekf.get_filter_fault_status(&status.filter_fault_flags);
 			_ekf.get_innovation_test_status(&status.innovation_check_flags, &status.mag_test_ratio,
 							&status.vel_test_ratio, &status.pos_test_ratio,
@@ -537,7 +622,7 @@ void Ekf2::run()
 			status.time_slip = _last_time_slip_us / 1e6f;
 			status.health_flags = 0.0f; // unused
 			status.timeout_flags = 0.0f; // unused
-            status.pre_flt_fail = false;
+			status.pre_flt_fail = _preflt_fail;
 
 			if (_estimator_status_pub == nullptr) {
 				_estimator_status_pub = orb_advertise(ORB_ID(estimator_status), &status);
@@ -546,8 +631,88 @@ void Ekf2::run()
 				orb_publish(ORB_ID(estimator_status), _estimator_status_pub, &status);
 			}
 
+			// publish GPS drift data only when updated to minimise overhead
+			{
+				// Check and save the last valid calibration when we are disarmed
+				if ((vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_STANDBY)
+				    && (status.filter_fault_flags == 0)
+				    && (sensor_selection.mag_device_id == (uint32_t)_mag_bias_id.get())) {
+
+					// reset to prevent data being saved too frequently
+					_total_cal_time_us = 0;
+				}
+
+			}
+
+			{
+				// publish estimator innovation data
+				if (vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_STANDBY) {
+					// set the max allowed yaw innovaton depending on whether we are not aiding navigation using
+					// observations in the NE reference frame.
+					bool doing_ne_aiding = control_status.flags.gps ||  control_status.flags.ev_pos;
+
+					float yaw_test_limit;
+
+					if (doing_ne_aiding && vehicle_status.is_rotary_wing) {
+						// use a smaller tolerance when doing NE inertial frame aiding as a rotary wing
+						// vehicle which cannot use GPS course to realign heading in flight
+						yaw_test_limit = _nav_yaw_innov_test_lim;
+
+					} else {
+						// use a larger tolerance when not doing NE inertial frame aiding or
+						// if a fixed wing vehicle which can realign heading using GPS course
+						yaw_test_limit = _yaw_innov_test_lim;
+					}
+
+					// filter the yaw innovations
+					_yaw_innov_magnitude_lpf = beta * _yaw_innov_magnitude_lpf + alpha * constrain(innovations.heading_innov,
+								   -2.0f * yaw_test_limit, 2.0f * yaw_test_limit);
+
+					_hgt_innov_lpf = beta * _hgt_innov_lpf + alpha * constrain(innovations.vel_pos_innov[5], -_hgt_innov_spike_lim,
+							 _hgt_innov_spike_lim);
+
+					// check the yaw and horizontal velocity innovations
+					float vel_ne_innov_length = sqrtf(innovations.vel_pos_innov[0] * innovations.vel_pos_innov[0] +
+									  innovations.vel_pos_innov[1] * innovations.vel_pos_innov[1]);
+					_preflt_horiz_fail = (_vel_ne_innov_lpf.norm() > _vel_innov_test_lim)
+							     || (vel_ne_innov_length > 2.0f * _vel_innov_test_lim)
+							     || (_yaw_innov_magnitude_lpf > yaw_test_limit);
+
+					// check the vertical velocity and position innovations
+					_preflt_vert_fail = (fabsf(_vel_d_innov_lpf) > _vel_innov_test_lim)
+							    || (fabsf(innovations.vel_pos_innov[2]) > 2.0f * _vel_innov_test_lim)
+							    || (fabsf(_hgt_innov_lpf) > _hgt_innov_test_lim);
+
+					// master pass-fail status
+					_preflt_fail = _preflt_horiz_fail || _preflt_vert_fail;
+
+				} else {
+					_vel_ne_innov_lpf.zero();
+					_vel_d_innov_lpf = 0.0f;
+					_hgt_innov_lpf = 0.0f;
+					_preflt_horiz_fail = false;
+					_preflt_vert_fail = false;
+					_preflt_fail = false;
+				}
+
+				if (_estimator_innovations_pub == nullptr) {
+					_estimator_innovations_pub = orb_advertise(ORB_ID(ekf2_innovations), &innovations);
+
+				} else {
+					orb_publish(ORB_ID(ekf2_innovations), _estimator_innovations_pub, &innovations);
+				}
+			}
+
 		}
-    }
+
+		// publish ekf2_timestamps
+		if (_ekf2_timestamps_pub == nullptr) {
+			_ekf2_timestamps_pub = orb_advertise(ORB_ID(ekf2_timestamps), &ekf2_timestamps);
+
+		} else {
+			orb_publish(ORB_ID(ekf2_timestamps), _ekf2_timestamps_pub, &ekf2_timestamps);
+		}
+	}
 }
 
 bool Ekf2::publish_attitude(const sensor_combined_s &sensors, const hrt_abstime &now)
@@ -606,6 +771,7 @@ const Vector3f Ekf2::get_vel_body_wind()
 
 	return R_to_body * v_wind_comp;
 }
+
 
 Ekf2 *Ekf2::instantiate(int argc, char *argv[])
 {
