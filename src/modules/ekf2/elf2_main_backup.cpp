@@ -116,8 +116,6 @@ public:
 
 	int print_status() override;
 
-	void LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result);
-
 private:
 	int getRangeSubIndex(const int *subs); ///< get subscription index of first downward-facing range sensor
 
@@ -669,34 +667,6 @@ int Ekf2::print_status()
 	perf_print_counter(_perf_ekf_update);
 
 	return 0;
-}
-
-void Ekf2::LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result)
-{
-	float exp = 0.08181919f;
-	float Ne, Ner;
-	float xe, ye, ze;
-	float xer, yer, zer;
-
-	//double _position_NED[3] = {0.0};
-
-	// LLA[0] = Latitude, LLA[1] = Longitude, LLA[2] = height
-	Ne = 6378137.0f / sqrtf(1.0f-exp*exp*sinf(cur_pos_LLA[0])*sinf(cur_pos_LLA[0]));
-	Ner = 6378137.0f / sqrtf(1.0f-exp*exp*sinf(home_pos_LLA[0])*sinf(home_pos_LLA[0]));
-
-	xe = (Ne + cur_pos_LLA[2])*cosf(cur_pos_LLA[0])*cosf(cur_pos_LLA[1]);
-	ye = (Ne + cur_pos_LLA[2])*cosf(cur_pos_LLA[0])*sinf(cur_pos_LLA[1]);
-	ze = (Ne*(1.0f-exp*exp) + cur_pos_LLA[2])*sinf(cur_pos_LLA[0]);
-
-	xer = (Ner + home_pos_LLA[2])*cosf(home_pos_LLA[0])*cosf(home_pos_LLA[1]);
-	yer = (Ner + home_pos_LLA[2])*cosf(home_pos_LLA[0])*sinf(home_pos_LLA[1]);
-	zer = (Ner*(1.0f-exp*exp) + home_pos_LLA[2])*sinf(home_pos_LLA[0]);
-
-	result[0] = -sinf(home_pos_LLA[0])*cosf(home_pos_LLA[1])*(xe-xer) -sinf(home_pos_LLA[0])*sinf(home_pos_LLA[1])*(ye-yer) + cosf(home_pos_LLA[0])*(ze-zer);
-	result[1] = -sinf(home_pos_LLA[1])*(xe-xer) + cosf(home_pos_LLA[1])*(ye-yer);
-	result[2] = -cosf(home_pos_LLA[0])*cosf(home_pos_LLA[1])*(xe-xer) - cosf(home_pos_LLA[0])*sinf(home_pos_LLA[1])*(ye-yer) - sinf(home_pos_LLA[0])*(ze-zer);
-
-//	return _position_NED;
 }
 
 template<typename Param>

@@ -27,7 +27,7 @@
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_range_finder.h>
-#include <drivers/drv_serial.h>
+//#include <drivers/drv_serial.h>
 #include <drivers/device/device.h>
 #include <drivers/device/ringbuffer.h>
 
@@ -43,9 +43,6 @@
 #include <lib/conversion/rotation.h>
 #include <drivers/drv_accel.h>
 #include <drivers/drv_gyro.h>
-#include <mathlib/math/filter/LowPassFilter2p.cpp>
-#include <drivers/device/integrator.h>
-
 
 #include <board_config.h>
 
@@ -133,7 +130,7 @@ private:
 	int								_measure_ticks;
 	bool							_collect_phase;
 	int								_fd;
-	char							_linebuf[43];
+	char							_linebuf[50];
 	unsigned						_linebuf_index;
 //	enum SERIAL_COM_PARSE_STATE		_parse_state;
 	int								_class_instance;
@@ -195,9 +192,6 @@ SERIAL_COM::SERIAL_COM(const char *port) :
 	_consecutive_fail_count(0),
 	_sample_perf(perf_alloc(PC_ELAPSED, "serial_com_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "serial_com_err"))
-
-
-
 {
 	/* store port name */
 	strncpy(_port, port, sizeof(_port));
@@ -294,7 +288,7 @@ SERIAL_COM::~SERIAL_COM()
 	}
 
 	if (_class_instance != -1) {
-		unregister_class_devname(SERIAL_BASE_DEVICE_PATH, _class_instance);
+		unregister_class_devname("/dev/serial_com", _class_instance);
 	}
 
 
@@ -320,7 +314,7 @@ SERIAL_COM::init()
 			break;
 		}
 
-		_class_instance = register_class_devname(SERIAL_BASE_DEVICE_PATH);
+		_class_instance = register_class_devname("/dev/serial_com");
 		struct serial_com_s ds_report = {};
 
 		_serial_com_topic = orb_advertise_multi(ORB_ID(serial_com), &ds_report,	&_orb_class_instance, ORB_PRIO_MAX);
@@ -416,8 +410,8 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 ssize_t
 SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 {
-	unsigned count = buflen / sizeof(serial_com_s);
-	serial_com_s *rbuf = reinterpret_cast<serial_com_s *>(buffer);
+	unsigned count = buflen / sizeof(struct serial_com_s);
+	struct serial_com_s *rbuf = reinterpret_cast<struct serial_com_s *>(buffer);
 	int ret = 0;
 
 	if (count < 1) {
@@ -634,11 +628,6 @@ unsigned int SERIAL_COM::Hils_packet_parser(unsigned char *buf)
 		{
 			warnx("p=%d, q=%d, r=%d", report.roll_rate,report.pitch_rate,report.yaw_rate); // 0 3
 		}
-		//warnx("\n roll=%d, pitch=%d, yaw=%d", report.roll_angle,report.pitch_angle,report.yaw_angle);
-		//warnx("\n roll_rate=%d   pitch_rate=%d   yaw_rate=%d", report.roll_rate,report.pitch_rate,report.yaw_rate); // 0 3
-		//warnx("\n x_n=%d, y_e=%d, z_d=%d", report.x_n,report.y_e,report.z_d);
-		//warnx("\n lat=%4.3f, lon=%4.3f, alt=%4.3f", (double)report.latitude,(double)report.longitude,(double)report.altitude);
-
 	}
 	else
 	{
