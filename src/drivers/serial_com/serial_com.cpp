@@ -511,7 +511,7 @@ unsigned short SERIAL_COM::UpdateCRC(unsigned short crc, unsigned char bytedata)
 
 unsigned int SERIAL_COM::Hils_packet_parser(unsigned char *buf)
 {
-	float *float_ptr;
+	//float *float_ptr;
 
 	int16_t roll_angle, pitch_angle, yaw_angle;
 	int16_t roll_rate, pitch_rate, yaw_rate;
@@ -522,7 +522,9 @@ unsigned int SERIAL_COM::Hils_packet_parser(unsigned char *buf)
 
 	muxidx = ((int16_t)buf[2] << 8) | (int16_t)buf[3];
 
-	float_ptr  = (float*)&buf[4];
+	memcpy(&latitude, &buf[4], sizeof(float));
+	memcpy(&longitude, &buf[8], sizeof(float));
+	memcpy(&altitude, &buf[12], sizeof(float));
 
 	latitude = *(float_ptr+0);		// 4  4567
 	longitude = *(float_ptr+1);		// 8  891011
