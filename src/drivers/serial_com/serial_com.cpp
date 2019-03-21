@@ -526,10 +526,6 @@ unsigned int SERIAL_COM::Hils_packet_parser(unsigned char *buf)
 	memcpy(&longitude, &buf[8], sizeof(float));
 	memcpy(&altitude, &buf[12], sizeof(float));
 
-	latitude = *(float_ptr+0);		// 4  4567
-	longitude = *(float_ptr+1);		// 8  891011
-	altitude = *(float_ptr+2);		// 12 12131415
-
 	roll_angle = ((int16_t)buf[16] << 8) | (int16_t)buf[17];
 	pitch_angle =  ((int16_t)buf[18] << 8) | (int16_t)buf[19];
 	yaw_angle =  ((int16_t)buf[20] << 8) | (int16_t)buf[21];
@@ -742,7 +738,6 @@ SERIAL_COM::start_cycle(unsigned delay_ticks)
 {
 	/* reset the report ring and state machine */
 	_collect_phase = false;
-	_measure_phase = false;
 	_reports->flush();
 
 	work_queue(HPWORK, &_work, (worker_t)&SERIAL_COM::cycle_trampoline, this, delay_ticks);
@@ -806,7 +801,7 @@ SERIAL_COM::cycle()
 			_consecutive_fail_count++;
 
 			/* restart the measurement state machine */
-			start();
+			start_cycle();
 			return;
 		}
 
@@ -899,7 +894,7 @@ start(const char *port)
 	}
 
 	/* set the poll rate to default, starts automatic data collection */
-	fd = open(SERIAL_DEVICE_PATH, 0);
+	fd = open("/dev/serial_com0", 0);
 
 	warnx("/dev/serial0 open success : %d", fd); //3
 
@@ -945,13 +940,10 @@ void stop()
 void
 test()
 {
-	struct serial_com_s report;
 	ssize_t sz;
 
 	char testbyte;
 	int j;
-
-	//int fd = open(SERIAL_DEVICE_PATH, O_RDONLY);//O_RDWR);
 
 	int fd = open("/dev/ttyS6", O_WRONLY);
 
@@ -962,6 +954,7 @@ test()
 		usleep(10000);
 	}
 
+	warnx("sz=%d",sz);
 	// reset the sensor polling to the default rate
 	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT)) {
 		errx(1, "ERR: DEF RATE");
@@ -1060,7 +1053,7 @@ void disable_PWMout()
 void
 reset()
 {
-	int fd = open(SERIAL_DEVICE_PATH, O_RDONLY);
+	int fd = open("/dev/serial_com0", O_RDONLY);
 
 	if (fd < 0) {
 		err(1, "failed ");
