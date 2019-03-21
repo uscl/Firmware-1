@@ -114,7 +114,7 @@ public:
 	virtual ~SERIAL_COM();
 
 	virtual int 			init();
-	virtual ssize_t			read(struct file *filp, char *buffer, size_t buflen);
+	//virtual ssize_t			read(struct file *filp, char *buffer, size_t buflen);
 	virtual int				ioctl(struct file *filp, int cmd, unsigned long arg);
 	void				print_info();
 	char							log_status;
@@ -413,6 +413,7 @@ SERIAL_COM::ioctl(struct file *filp, int cmd, unsigned long arg)
 	return CDev::ioctl(filp, cmd, arg);
 }
 
+/*
 ssize_t
 SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 {
@@ -442,25 +443,26 @@ SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 			warnx("SERIAL_COM::read while out ret : %d", ret); //64
 			return ret ? ret : -EAGAIN; // try again
 	}
-
+*/
 	/* manual measurement - run one conversion */
+/*
 	do {
 		_reports->flush();
 
 		warnx("read start");
 		/* wait for it to complete */
-		usleep(SERIAL_COM_CONVERSION_INTERVAL);
+		//usleep(SERIAL_COM_CONVERSION_INTERVAL);
 
 		/* run the collection phase */
-		if (OK != collect())
-		{
-			warnx("collect %d", collect());
-			ret = -EIO;
-			break;
-		}
+		//if (OK != collect())
+		//{
+		//	warnx("collect %d", collect());
+		//	ret = -EIO;
+		//	break;
+		//}
 
 		/* state machine will have generated a report, copy it out */
-		if (_reports->get(rbuf)) {
+/*		if (_reports->get(rbuf)) {
 			ret = sizeof(*rbuf);
 		}
 
@@ -470,6 +472,7 @@ SERIAL_COM::read(struct file *filp, char *buffer, size_t buflen)
 
 	return ret;
 }
+*/
 
 int
 SERIAL_COM::measure()
@@ -1017,36 +1020,6 @@ test()
 		sz = write(fd, &testbyte, 1);
 		usleep(10000);
 	}
-
-	// do a simple demand read
-	// start the sensor polling at 2 Hz rate
-	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, 2)) {
-		errx(1, "failed to set 2Hz poll rate");
-	}
-
-	// read the sensor 5x and report each value
-	for (unsigned i = 0; i < 5; i++) {
-		struct pollfd fds;
-
-		// wait for data to be ready
-		fds.fd = fd;
-		fds.events = POLLIN;
-		int ret = poll(&fds, 1, 2000);
-
-		if (ret != 1) {
-			warnx("timed out");
-			break;
-		}
-
-		// now go get it
-		sz = read(fd, &report, sizeof(report));
-
-		if (sz != sizeof(report)) {
-			warnx("read failed: got %d vs exp. %d", sz, sizeof(report));
-			break;
-		}
-	}
-
 
 	// reset the sensor polling to the default rate
 	if (OK != ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT)) {
