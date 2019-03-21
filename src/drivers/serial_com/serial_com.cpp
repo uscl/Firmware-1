@@ -130,7 +130,7 @@ private:
 	int								_measure_ticks;
 	bool							_collect_phase;
 	int								_fd;
-	char							_linebuf[50];
+	char							_linebuf[54];
 	unsigned						_linebuf_index;
 //	enum SERIAL_COM_PARSE_STATE		_parse_state;
 	int								_class_instance;
@@ -269,6 +269,12 @@ SERIAL_COM::SERIAL_COM(const char *port) :
 	{
 		_actuator_pwm[i] = 0.0f;
 	}
+
+	for(int i = 0; i< 54; i++)
+	{
+		_linebuf[i] = 0;
+	}
+
 	log_status = 0;
 	tx_status = 0;
 
