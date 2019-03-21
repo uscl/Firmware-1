@@ -41,10 +41,11 @@
 #include <uORB/topics/sensor_gyro.h>
 
 #include <uORB/topics/actuator_outputs.h>
+
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/home_position.h>
 #include <uORB/topics/vehicle_attitude.h>
-#include <uORB/topics/mission_info.h>
+//#include <uORB/topics/mission_info.h>
 #include <uORB/topics/start_goal_position.h>
 #include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/actuator_armed.h>
