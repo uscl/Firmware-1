@@ -1,4 +1,5 @@
 # This is similar to the mavlink message CONTROL_SYSTEM_STATE, but for onboard use */
+uint64 timestamp			# time since system start (microseconds)
 uint8 AIRSPD_MODE_MEAS = 0	# airspeed is measured airspeed from sensor
 uint8 AIRSPD_MODE_EST = 1	# airspeed is estimated by body velocity
 uint8 AIRSPD_MODE_DISABLED = 2	# airspeed is disabled
