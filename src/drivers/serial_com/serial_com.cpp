@@ -122,13 +122,13 @@ private:
 	char 							_port[20];
 	work_s							_work;
 	ringbuffer::RingBuffer			*_reports;
-	int								_measure_ticks;
-	bool							_collect_phase;
-	int								_fd;
-	char							_linebuf[44];
-	unsigned						_linebuf_index;
-	int								_class_instance;
-	int								_orb_class_instance;
+        int						_measure_ticks;
+        bool						_collect_phase;
+        int						_fd;
+        char						_linebuf[44];
+        unsigned					_linebuf_index;
+        int						_class_instance;
+        int						_orb_class_instance;
 	orb_advert_t					_serial_com_topic;
 	int 							actuator_outputs_fd;
 	unsigned						_consecutive_fail_count;
@@ -288,7 +288,7 @@ SERIAL_COM::~SERIAL_COM()
 	}
 
 	if (_class_instance != -1) {
-		unregister_class_devname("/dev/serial_com", _class_instance);
+                unregister_class_devname("/dev/serial_com", _class_instance);
 	}
 
 
@@ -563,7 +563,6 @@ unsigned int SERIAL_COM::Hils_packet_parser(unsigned char *buf)
 	if (_serial_com_topic != nullptr)
 	{
 		orb_publish(ORB_ID(serial_com), _serial_com_topic, &report);
-
 		if (log_status)
 		{
 			warnx("p=%d, q=%d, r=%d", report.roll_rate,report.pitch_rate,report.yaw_rate); // 0 3

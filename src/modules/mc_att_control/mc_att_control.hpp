@@ -57,6 +57,7 @@
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/landing_gear.h>
+#include <uORB/topics/control_state.h>
 
 /**
  * Multicopter attitude control app start / stop handling function
@@ -160,6 +161,7 @@ private:
 	int		_sensor_bias_sub{-1};		/**< sensor in-run bias correction subscription */
 	int		_vehicle_land_detected_sub{-1};	/**< vehicle land detected subscription */
 	int		_landing_gear_sub{-1};
+        int             _ctrl_state_sub{-1};            // For PILS
 
 	unsigned _gyro_count{1};
 	int _selected_gyro{0};
@@ -187,6 +189,7 @@ private:
 	struct sensor_bias_s			_sensor_bias {};	/**< sensor in-run bias corrections */
 	struct vehicle_land_detected_s		_vehicle_land_detected {};
 	struct landing_gear_s 			_landing_gear {};
+        struct control_state_s                  _ctrl_state {};         // For PILS
 
 	MultirotorMixer::saturation_status _saturation_status{};
 

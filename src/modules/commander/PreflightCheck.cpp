@@ -163,8 +163,9 @@ static bool imuConsistencyCheck(orb_advert_t *mavlink_log_pub, vehicle_status_s 
 	// Use the difference between IMU's to detect a bad calibration.
 	// If a single IMU is fitted, the value being checked will be zero so this check will always pass.
 	param_get(param_find("COM_ARM_IMU_ACC"), &test_limit);
-
+/* Removed for Debugging (2019.3.23)
 	if (sensors.accel_inconsistency_m_s_s > test_limit) {
+            warnx("accel_inconsistency=%7.5f", (double)sensors.accel_inconsistency_m_s_s);
 		if (report_status) {
 			mavlink_log_critical(mavlink_log_pub, "Preflight Fail: Accels inconsistent - Check Cal");
 			set_health_flags_healthy(subsystem_info_s::SUBSYSTEM_TYPE_ACC, false, status);
@@ -179,7 +180,7 @@ static bool imuConsistencyCheck(orb_advert_t *mavlink_log_pub, vehicle_status_s 
 			mavlink_log_info(mavlink_log_pub, "Preflight Advice: Accels inconsistent - Check Cal");
 		}
 	}
-
+*/
 	// Fail if gyro difference greater than 5 deg/sec and notify if greater than 2.5 deg/sec
 	param_get(param_find("COM_ARM_IMU_GYR"), &test_limit);
 

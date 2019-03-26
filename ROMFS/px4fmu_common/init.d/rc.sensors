@@ -122,3 +122,9 @@ sensors start
 if serial_com start
 then 
 fi
+
+gps stop
+
+if gps start -f
+then
+fi

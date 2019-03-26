@@ -101,7 +101,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_loop_perf(perf_alloc(PC_ELAPSED, "mc_att_control"))
 {
 	for (uint8_t i = 0; i < MAX_GYRO_COUNT; i++) {
-		_sensor_gyro_sub[i] = -1;
+                _sensor_gyro_sub[i] = -1;
 	}
 
 	_vehicle_status.is_rotary_wing = true;
@@ -552,6 +552,23 @@ MulticopterAttitudeControl::control_attitude()
 	Quatf q(_v_att.q);
 	Quatf qd(_v_att_sp.q_d);
 
+        /*
+        // Debug
+        float qq[4];
+        float Euler[3];
+        qq[0] = _v_att.q[0];
+        qq[1] = _v_att.q[1];
+        qq[2] = _v_att.q[2];
+        qq[3] = _v_att.q[3];
+
+        // Convert to Euler
+        Euler[0] = 57.2957f*atan2(2.0f*(qq[0]*qq[1]+qq[2]*qq[3]), qq[0]*qq[0] - qq[1]*qq[1] - qq[2]*qq[2] + qq[3]*qq[3]);
+        Euler[1] = 57.2957f*asin(2.0f*(qq[0]*qq[2] - qq[1]*qq[3]));
+        Euler[2] = 57.2957f*atan2(2.0f*(qq[0]*qq[3]+qq[1]*qq[2]), qq[0]*qq[0] + qq[1]*qq[1] - qq[2]*qq[2] - qq[3]*qq[3]);
+
+        PX4_INFO("phi=%4.3f,theta=%4.3f,psi=%4.3f", (double)Euler[0], (double)Euler[1], (double)Euler[2]);
+        */
+
 	/* ensure input quaternions are exactly normalized because acosf(1.00001) == NaN */
 	q.normalize();
 	qd.normalize();
@@ -649,7 +666,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	// get the raw gyro data and correct for thermal errors
 	Vector3f rates;
-
+        /* PILS modification
 	if (_selected_gyro == 0) {
 		rates(0) = (_sensor_gyro.x - _sensor_correction.gyro_offset_0[0]) * _sensor_correction.gyro_scale_0[0];
 		rates(1) = (_sensor_gyro.y - _sensor_correction.gyro_offset_0[1]) * _sensor_correction.gyro_scale_0[1];
@@ -678,6 +695,11 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	rates(0) -= _sensor_bias.gyro_x_bias;
 	rates(1) -= _sensor_bias.gyro_y_bias;
 	rates(2) -= _sensor_bias.gyro_z_bias;
+        */
+
+        rates(0) = _ctrl_state.roll_rate;
+        rates(1) = _ctrl_state.pitch_rate;
+        rates(2) = _ctrl_state.yaw_rate;
 
 	Vector3f rates_p_scaled = _rate_p.emult(pid_attenuations(_tpa_breakpoint_p.get(), _tpa_rate_p.get()));
 	Vector3f rates_i_scaled = _rate_i.emult(pid_attenuations(_tpa_breakpoint_i.get(), _tpa_rate_i.get()));
@@ -687,7 +709,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	Vector3f rates_err = _rates_sp - rates;
 
 	/* apply low-pass filtering to the rates for D-term */
-	Vector3f rates_filtered(_lp_filters_d.apply(rates));
+        Vector3f rates_filtered(_lp_filters_d.apply(rates));
 
 	_att_control = rates_p_scaled.emult(rates_err) +
 		       _rates_int -
@@ -807,6 +829,7 @@ MulticopterAttitudeControl::run()
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 	_motor_limits_sub = orb_subscribe(ORB_ID(multirotor_motor_limits));
 	_battery_status_sub = orb_subscribe(ORB_ID(battery_status));
+        _ctrl_state_sub = orb_subscribe(ORB_ID(control_state));
 
 	_gyro_count = math::constrain(orb_group_count(ORB_ID(sensor_gyro)), 1, MAX_GYRO_COUNT);
 
@@ -834,8 +857,13 @@ MulticopterAttitudeControl::run()
 	while (!should_exit()) {
 
 		// check if the selected gyro has updated first
-		sensor_correction_poll();
-		poll_fds.fd = _sensor_gyro_sub[_selected_gyro];
+                //sensor_correction_poll();
+                //poll_fds.fd = _sensor_gyro_sub[_selected_gyro];
+
+                // PILS modification:
+                // Check if the control state from the PILS data has updated
+                //control_state_poll();
+                poll_fds.fd = _ctrl_state_sub;
 
 		/* wait for up to 100ms for data */
 		int pret = px4_poll(&poll_fds, 1, 100);
@@ -860,11 +888,15 @@ MulticopterAttitudeControl::run()
 			const hrt_abstime now = hrt_absolute_time();
 
 			// Guard against too small (< 0.2ms) and too large (> 20ms) dt's.
-			const float dt = math::constrain(((now - last_run) / 1e6f), 0.0002f, 0.02f);
+                        //const float dt = math::constrain(((now - last_run) / 1e6f), 0.0002f, 0.02f);
+                        const float dt = (now - last_run) / 1e6f;
 			last_run = now;
 
 			/* copy gyro data */
-			orb_copy(ORB_ID(sensor_gyro), _sensor_gyro_sub[_selected_gyro], &_sensor_gyro);
+                        //orb_copy(ORB_ID(sensor_gyro), _sensor_gyro_sub[_selected_gyro], &_sensor_gyro);
+
+                        /* Copy from the PILS data */
+                        orb_copy(ORB_ID(control_state), _ctrl_state_sub, &_ctrl_state);
 
 			/* run the rate controller immediately after a gyro update */
 			if (_v_control_mode.flag_control_rates_enabled) {
@@ -943,7 +975,7 @@ MulticopterAttitudeControl::run()
 					_rates_int.zero();
 					_thrust_sp = 0.0f;
 					_att_control.zero();
-					publish_actuator_controls();
+                                        publish_actuator_controls();
 				}
 			}
 
@@ -983,6 +1015,7 @@ MulticopterAttitudeControl::run()
 	orb_unsubscribe(_vehicle_status_sub);
 	orb_unsubscribe(_motor_limits_sub);
 	orb_unsubscribe(_battery_status_sub);
+        orb_unsubscribe(_ctrl_state_sub);
 
 	for (unsigned s = 0; s < _gyro_count; s++) {
 		orb_unsubscribe(_sensor_gyro_sub[s]);

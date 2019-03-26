@@ -76,10 +76,6 @@
 #define BLEND_MASK_USE_HPOS_ACC     2
 #define BLEND_MASK_USE_VPOS_ACC     4
 
-// define max number of GPS receivers supported and 0 base instance used to access virtual 'blended' GPS solution
-#define GPS_MAX_RECEIVERS 2
-#define GPS_BLENDED_INSTANCE 2
-
 using math::constrain;
 using namespace time_literals;
 
@@ -106,19 +102,13 @@ public:
 	/** @see ModuleBase::run() */
 	void run() override;
 
-//	void set_replay_mode(bool replay) { _replay_mode = replay; }
-
 	static void	task_main_trampoline(int argc, char *argv[]);
 
-    void LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result);
+        void LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result);
 
 	int print_status() override;
 
 private:
-	bool publish_attitude(const sensor_combined_s &sensors, const hrt_abstime &now);
-
-//	bool 	_replay_mode = false;			///< true when we use replay data from a log
-
 	// time slip monitoring
 	uint64_t _start_time_us = 0;		///< system time at EKF start (uSec)
 	int64_t _last_time_slip_us = 0;		///< Last time slip (uSec)
@@ -130,53 +120,44 @@ private:
 	// TODO: the user should be allowed to set these values by a parameter
 	static constexpr float ep_max_std_dev = 100.0f;	///< Maximum permissible standard deviation for estimated position
 	static constexpr float eo_max_std_dev = 100.0f;	///< Maximum permissible standard deviation for estimated orientation
-	//static constexpr float ev_max_std_dev = 100.0f;	///< Maximum permissible standard deviation for estimated velocity
 
-	// GPS blending and switching
-//    Vector2f _NE_pos_offset_m[GPS_MAX_RECEIVERS] = {}; ///< Filtered North,East position offset from GPS instance to blended solution in _output_state.location (m)
-
-//	int _params_sub{-1};
 	int _sensors_sub{-1};
+        //int _gps_sub{-1};
 	int _status_sub{-1};
 	int _vehicle_land_detected_sub{-1};
-    int _serial_com_sub{-1};
-    int _home_position_sub{-1};
+        int _serial_com_sub{-1};
+        int _home_position_sub{-1};
 
-	// because we can have multiple GPS instances
-    //int _gps_subs[GPS_MAX_RECEIVERS] {};
-    //int _gps_orb_instance{-1};
+        int _gps_orb_instance{-1};
 
 	orb_advert_t _att_pub{nullptr};
-    orb_advert_t _control_state_pub{nullptr};
+        orb_advert_t _control_state_pub{nullptr};
+        orb_advert_t _lpos_pub{nullptr};
+        orb_advert_t _vehicle_global_position_pub{nullptr};
+        orb_advert_t _blended_gps_pub{nullptr};
 
-	uORB::Publication<vehicle_local_position_s> _vehicle_local_position_pub;
-	uORB::Publication<vehicle_global_position_s> _vehicle_global_position_pub;
+        //uORB::Publication<vehicle_local_position_s> _vehicle_local_position_pub;
+        //uORB::Publication<vehicle_global_position_s> _vehicle_global_position_pub;
 
 	Ekf _ekf;
 
-	parameters *_params;	///< pointer to ekf parameter struct (located in _ekf class instance)
+        //parameters *_params;	///< pointer to ekf parameter struct (located in _ekf class instance)
 
 };
 
 Ekf2::Ekf2():
 	ModuleParams(nullptr),
 	_perf_update_data(perf_alloc_once(PC_ELAPSED, "EKF2 data acquisition")),
-	_perf_ekf_update(perf_alloc_once(PC_ELAPSED, "EKF2 update")),
-	_vehicle_local_position_pub(ORB_ID(vehicle_local_position)),
-	_vehicle_global_position_pub(ORB_ID(vehicle_global_position)),
-    _params(_ekf.getParamHandle())
+        _perf_ekf_update(perf_alloc_once(PC_ELAPSED, "EKF2 update"))
+        //_vehicle_local_position_pub(ORB_ID(vehicle_local_position)),
 {
-//	_params_sub = orb_subscribe(ORB_ID(parameter_update));
 	_sensors_sub = orb_subscribe(ORB_ID(sensor_combined));
+        //_gps_sub = orb_subscribe(ORB_ID(vehicle_gps_position));
 	_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 	_vehicle_land_detected_sub = orb_subscribe(ORB_ID(vehicle_land_detected));
-/*
-	for (unsigned i = 0; i < GPS_MAX_RECEIVERS; i++) {
-		_gps_subs[i] = orb_subscribe_multi(ORB_ID(vehicle_gps_position), i);
-	}
-*/
-	// initialise parameter cache
-    //updateParams();
+        _serial_com_sub = orb_subscribe(ORB_ID(serial_com));
+        _home_position_sub = orb_subscribe(ORB_ID(home_position));
+
 }
 
 Ekf2::~Ekf2()
@@ -188,6 +169,8 @@ Ekf2::~Ekf2()
 	orb_unsubscribe(_sensors_sub);
 	orb_unsubscribe(_status_sub);
 	orb_unsubscribe(_vehicle_land_detected_sub);
+        orb_unsubscribe(_serial_com_sub);
+        orb_unsubscribe(_home_position_sub);
 /*
     for (unsigned i = 0; i < GPS_MAX_RECEIVERS; i++) {
 		orb_unsubscribe(_gps_subs[i]);
@@ -235,63 +218,62 @@ void Ekf2::LLA2NED(float *home_pos_LLA, float *cur_pos_LLA, float *result)
 
 void Ekf2::run()
 {
-	px4_pollfd_struct_t fds[1] = {};
-	fds[0].fd = _sensors_sub;
-	fds[0].events = POLLIN;
+    px4_pollfd_struct_t fds[1] = {};
+    fds[0].fd = _sensors_sub;
+    fds[0].events = POLLIN;
 
-	// initialize data structures outside of loop
-	// because they will else not always be
-	// properly populated
-	sensor_combined_s sensors = {};
-	vehicle_land_detected_s vehicle_land_detected = {};
-	vehicle_status_s vehicle_status = {};
+    // initialize data structures outside of loop
+    // because they will else not always be
+    // properly populated
+    sensor_combined_s sensors = {};
+    //vehicle_gps_position_s gps = {};
+    vehicle_land_detected_s vehicle_land_detected = {};
+    vehicle_status_s vehicle_status = {};
     serial_com_s _serial_com = {};
     home_position_s _home_position = {}; // Added for home position
 
-	while (!should_exit()) {
-		int ret = px4_poll(fds, sizeof(fds) / sizeof(fds[0]), 1000);
+    while (!should_exit()) {
+        int ret = px4_poll(fds, sizeof(fds) / sizeof(fds[0]), 1000);
 
-		if (!(fds[0].revents & POLLIN)) {
-			// no new data
-			continue;
-		}
+        if (!(fds[0].revents & POLLIN)) {
+            // no new data
+            continue;
+        }
 
-		if (ret < 0) {
-			// Poll error, sleep and try again
-			px4_usleep(10000);
-			continue;
+        if (ret < 0) {
+            // Poll error, sleep and try again
+            px4_usleep(10000);
+            continue;
+        } else if (ret == 0) {
+            // Poll timeout or no new data, do nothing
+            continue;
+        }
 
-		} else if (ret == 0) {
-			// Poll timeout or no new data, do nothing
-			continue;
-		}
-
-		perf_begin(_perf_update_data);
-
+        perf_begin(_perf_update_data);
 
         orb_copy(ORB_ID(sensor_combined), _sensors_sub, &sensors);
 
-		// update all other topics if they have new data
-		bool vehicle_status_updated = false;
+        // update all other topics if they have new data
+        bool vehicle_status_updated = false;
 
-		orb_check(_status_sub, &vehicle_status_updated);
-        if (vehicle_status_updated) orb_copy(ORB_ID(vehicle_status), _status_sub, &vehicle_status);
+        orb_check(_status_sub, &vehicle_status_updated);
+        if (vehicle_status_updated) {
+            orb_copy(ORB_ID(vehicle_status), _status_sub, &vehicle_status);
+        }
 
         const hrt_abstime now = hrt_absolute_time();
 
-		// publish attitude immediately (uses quaternion from output predictor)
         //publish_attitude(sensors, now);
-		bool vehicle_land_detected_updated = false;
-		orb_check(_vehicle_land_detected_sub, &vehicle_land_detected_updated);
-
-		if (vehicle_land_detected_updated) {
+        bool vehicle_land_detected_updated = false;
+        orb_check(_vehicle_land_detected_sub, &vehicle_land_detected_updated);
+        if (vehicle_land_detected_updated) {
             orb_copy(ORB_ID(vehicle_land_detected), _vehicle_land_detected_sub, &vehicle_land_detected);
-		}
+        }
 
         bool serial_com_updated = false;
         orb_check(_serial_com_sub, &serial_com_updated);
         if (serial_com_updated) {
-           orb_copy(ORB_ID(serial_com), _serial_com_sub, &_serial_com);
+            orb_copy(ORB_ID(serial_com), _serial_com_sub, &_serial_com);
         }
 
         bool home_position_upodated;
@@ -299,6 +281,14 @@ void Ekf2::run()
         if (home_position_upodated) {
             orb_copy(ORB_ID(home_position), _home_position_sub, &_home_position);
         }
+
+        // publish attitude immediately (uses quaternion from output predictor)
+        //bool gps_updated = false;
+        //orb_check(_gps_sub, &gps_updated);
+        //if (gps_updated) {
+        //    orb_copy(ORB_ID(vehicle_gps_position), _gps_sub, &gps);
+        //s}
+
 
         perf_end(_perf_update_data);
 
@@ -315,26 +305,18 @@ void Ekf2::run()
             ctrl_state.timestamp = now;
 
             // Input data: [deg/sec], with SF 20
-            ctrl_state.roll_rate = (float)_serial_com.roll_rate*0.000872664626f;             // Converted to rad/sec (with SF=0.05)
-            ctrl_state.pitch_rate = (float)_serial_com.pitch_rate*0.000872664626f;           // Converted to rad/sec (with SF=0.05)
-            ctrl_state.yaw_rate = (float)_serial_com.yaw_rate*0.000872664626f;                      // Converted to rad/sec (with SF=0.05)
+            ctrl_state.roll_rate = (float)_serial_com.roll_rate*0.0008726646256f;             // Converted to rad/sec (with SF=0.05)
+            ctrl_state.pitch_rate = (float)_serial_com.pitch_rate*0.0008726646256f;           // Converted to rad/sec (with SF=0.05)
+            ctrl_state.yaw_rate = (float)_serial_com.yaw_rate*0.0008726646256f;                      // Converted to rad/sec (with SF=0.05)
 
             // Input data: [deg], with SF 100
-            Euler[0] = (float)_serial_com.roll_angle*0.00017532952f;  // Converted to rad (with SF=0.01)
-            Euler[1] = (float)_serial_com.pitch_angle*0.00017532952f; // Converted to rad (with SF=0.01)
-            Euler[2] = (float)_serial_com.yaw_angle*0.00017532952f;            // Converted to rad (with SF=0.01)
+            Euler[0] = (float)_serial_com.roll_angle*0.0001745329252f;  // Converted to rad (with SF=0.01)
+            Euler[1] = (float)_serial_com.pitch_angle*0.0001745329252f; // Converted to rad (with SF=0.01)
+            Euler[2] = (float)_serial_com.yaw_angle*0.0001745329252f;   // Converted to rad (with SF=0.01)
 
             att.rollspeed = ctrl_state.roll_rate;
             att.pitchspeed        = ctrl_state.pitch_rate;
             att.yawspeed   = ctrl_state.yaw_rate;
-
-            // Publish the attitude data
-            if (_att_pub == nullptr) {
-                _att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
-            }
-            else {
-                orb_publish(ORB_ID(vehicle_attitude), _att_pub, &att);
-            }
 
             float euler_phi     = Euler[0];
             float euler_theta   = Euler[1];
@@ -367,8 +349,44 @@ void Ekf2::run()
             ctrl_state.y_acc = 0.0f;
             ctrl_state.z_acc = 9.8f;
 
-            // generate vehicle local position data
-            vehicle_local_position_s &lpos = _vehicle_local_position_pub.get();
+            // Publish the attitude data
+            if (_att_pub == nullptr) {
+                _att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
+            }
+            else {
+                orb_publish(ORB_ID(vehicle_attitude), _att_pub, &att);
+            }
+
+            ekf_gps_position_s gps;
+            gps.timestamp   = now;//_serial_com.timestamp;
+            gps.lat 	= _serial_com.latitude*1e7f;
+            gps.lon 	= _serial_com.longitude*1e7f;
+            gps.alt 	= _serial_com.altitude*1000.0f;// * 0.01f;
+            gps.alt_ellipsoid = _serial_com.altitude*1000.0f;// * 0.01f;
+            gps.s_variance_m_s = 0.1f;
+            gps.fix_type = 3;
+            gps.eph = 0.5f;
+            gps.epv = 0.5f;
+            gps.vel_m_s = 0.01f*sqrtf(_serial_com.v_n*_serial_com.v_n+_serial_com.v_e*_serial_com.v_e+_serial_com.v_d*_serial_com.v_d);
+            gps.vel_n_m_s = _serial_com.v_n*0.01f; //gps.vel_n_m_s;
+            gps.vel_e_m_s = _serial_com.v_e*0.01f; //gps.vel_e_m_s;
+            gps.vel_d_m_s = _serial_com.v_d*0.01f; //gps.vel_d_m_s;
+            gps.vel_ned_valid = true;
+            gps.satellites_used = 9;
+            gps.heading = Euler[2];
+            gps.heading_offset = 0.0f;
+            gps.selected = 0;
+
+            // Publish to the EKF Blended GPS topic
+            //orb_publish_auto(ORB_ID(ekf_gps_position), &_blended_gps_pub, &gps, &_gps_orb_instance, ORB_PRIO_LOW);
+            if (_blended_gps_pub == nullptr) {
+                _blended_gps_pub = orb_advertise(ORB_ID(ekf_gps_position), &gps);
+            }
+            else {
+                orb_publish(ORB_ID(ekf_gps_position), _blended_gps_pub, &gps);
+            }
+
+            struct vehicle_local_position_s lpos = {};
 
             //float pos[3] = {};
             float vel[3] = {};
@@ -447,10 +465,13 @@ void Ekf2::run()
             lpos.ref_lon = math::degrees((double)home_pos_LLA[1]);//_serial_com.longitude;//ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
             lpos.ref_alt = _serial_com.altitude;
 
+            //warnx("hx=%7.5f, hy=%7.5f, alt=%7.5f", (double)home_pos_LLA[0], (double)home_pos_LLA[1],(double)lpos.ref_alt);
+            //warnx("accel_inconsistency=%7.5f", (double)sensors.accel_inconsistency_m_s_s);
+
             // The rotation of the tangent plane vs. geographical north
             lpos.yaw = Euler[2];
             //float terrain_vpos;
-            lpos.dist_bottom_valid = false;//ekf.get_terrain_vert_pos(&terrain_vpos);
+            lpos.dist_bottom_valid = true;//ekf.get_terrain_vert_pos(&terrain_vpos);
             lpos.dist_bottom = -pos_NED[2]; // Distance to bottom surface (ground) in meters
             lpos.dist_bottom_rate = -vel[2]; // Distance to bottom surface (ground) change rate
 
@@ -464,18 +485,17 @@ void Ekf2::run()
             lpos.hagl_min = 0.0f;
             lpos.hagl_max = 1000.0f;
 
-
             // publish vehicle local position data
-            _vehicle_local_position_pub.update();
-            //if (_lpos_pub == nullptr) {
-            //   _lpos_pub = orb_advertise(ORB_ID(vehicle_local_position), &lpos);
-            //}
-            //else {
-            //    orb_publish(ORB_ID(vehicle_local_position), _lpos_pub, &lpos);
-            //}
+            //_vehicle_local_position_pub.update();
+            if (_lpos_pub == nullptr) {
+               _lpos_pub = orb_advertise(ORB_ID(vehicle_local_position), &lpos);
+            }
+            else {
+                orb_publish(ORB_ID(vehicle_local_position), _lpos_pub, &lpos);
+            }
 
             // generate and publish global position data
-            vehicle_global_position_s &global_pos = _vehicle_global_position_pub.get();
+            struct vehicle_global_position_s global_pos = {};
 
             global_pos.timestamp = now; // Time of this estimate, in microseconds since system start
             global_pos.lat = (double)_serial_com.latitude; // Latitude in degrees
@@ -494,13 +514,12 @@ void Ekf2::run()
 
             global_pos.dead_reckoning = false;
 
-            _vehicle_global_position_pub.update();
-            //if (_vehicle_global_position_pub == nullptr) {
-            //    _vehicle_global_position_pub = orb_advertise(ORB_ID(vehicle_global_position), &global_pos);
-            //}
-            //else {
-            //    orb_publish(ORB_ID(vehicle_global_position), _vehicle_global_position_pub, &global_pos);
-            //}
+            if (_vehicle_global_position_pub == nullptr) {
+                _vehicle_global_position_pub = orb_advertise(ORB_ID(vehicle_global_position), &global_pos);
+            }
+            else {
+                orb_publish(ORB_ID(vehicle_global_position), _vehicle_global_position_pub, &global_pos);
+            }
         }
     }
 }
