@@ -359,9 +359,9 @@ void Ekf2::run()
 
             ekf_gps_position_s gps;
             gps.timestamp   = now;//_serial_com.timestamp;
-            gps.lat 	= _serial_com.latitude*1e7f;
-            gps.lon 	= _serial_com.longitude*1e7f;
-            gps.alt 	= _serial_com.altitude*1000.0f;// * 0.01f;
+            gps.lat 	= (int32_t)(_serial_com.latitude*1e7f);
+            gps.lon 	= (int32_t)(_serial_com.longitude*1e7f);
+            gps.alt 	= (int32_t)(_serial_com.altitude*1000.0f);// * 0.01f;
             gps.alt_ellipsoid = _serial_com.altitude*1000.0f;// * 0.01f;
             gps.s_variance_m_s = 0.1f;
             gps.fix_type = 3;
@@ -463,7 +463,7 @@ void Ekf2::run()
             lpos.ref_timestamp = now;
             lpos.ref_lat = math::degrees((double)home_pos_LLA[0]);//_serial_com.latitude;//ekf_origin.lat_rad * 180.0 / M_PI; // Reference point latitude in degrees
             lpos.ref_lon = math::degrees((double)home_pos_LLA[1]);//_serial_com.longitude;//ekf_origin.lon_rad * 180.0 / M_PI; // Reference point longitude in degrees
-            lpos.ref_alt = _serial_com.altitude;
+            lpos.ref_alt = home_pos_LLA[2];
 
             //warnx("hx=%7.5f, hy=%7.5f, alt=%7.5f", (double)home_pos_LLA[0], (double)home_pos_LLA[1],(double)lpos.ref_alt);
             //warnx("accel_inconsistency=%7.5f", (double)sensors.accel_inconsistency_m_s_s);
