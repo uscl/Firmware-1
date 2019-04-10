@@ -26,8 +26,6 @@ set MIXER quad_x
 
 set PWM_OUT 1234
 
-if [ $AUTOCNF = yes ]
-then
 	param set MC_ROLL_P 0.65
 	param set MC_ROLLRATE_P 0.015
 	param set MC_ROLLRATE_I 0.0
@@ -54,4 +52,23 @@ then
 	param set MPC_Z_VEL_MAX_UP 1.0
 	param set MPC_Z_VEL_P 0.1
 
-fi
+	param set CAL_ACC0_ID 1246218
+	param set CAL_ACC1_ID 1114634
+	param set CAL_ACC_PRIME 1246218
+	param set CAL_GYRO0_ID 2163722
+	param set CAL_GYRO1_ID 2228490
+	param set CAL_GYRO_PRIME 2163722
+	param set CAL_MAG0_ID 131594
+	param set CAL_MAG0_XOFF 0.0
+	param set CAL_MAG0_XSCALE 1.0
+	param set CAL_MAG0_YOFF 0.0
+	param set CAL_MAG0_YSCALE 1.0
+	param set CAL_MAG0_ZOFF 0.0
+	param set CAL_MAG0_ZSCALE 1.0
+	param set CAL_MAG_PRIME 131594
+
+	param set CBRK_IO_SAFETY 22027
+	param set CBRK_USB_CHK 197848
+	param set CBRK_SUPPLY_CHK 894281
+
+	param set NAV_ACC_RAD 4.0
